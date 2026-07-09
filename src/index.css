@@ -36,8 +36,11 @@ button { font: inherit; }
 @keyframes scan { 0% { transform: translateY(-100%); } 100% { transform: translateY(900px); } }
 @keyframes cardIn { from { opacity: 0; transform: translateY(16px) scale(.98); filter: blur(6px); } to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); } }
 
-.scrollbars ::-webkit-scrollbar { width: 6px; }
-.scrollbars ::-webkit-scrollbar-thumb { background: rgba(90, 170, 255, .2); border-radius: 3px; }
+* { scrollbar-width: thin; scrollbar-color: rgba(90, 170, 255, .28) transparent; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(90, 170, 255, .28); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(90, 170, 255, .45); }
 
 /* ---- transitions "noyau" partagées (fermeture de module / retour Home) ---- */
 @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }

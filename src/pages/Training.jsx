@@ -421,7 +421,7 @@ function ExerciseDetail({ ei, ex, ctx, checks, weights, rpeSel, onToggleSet, onS
 
       <div className="tr-graph">
         <div className="lbl">PROGRESSION</div>
-        <svg viewBox="0 0 480 90" width="100%" height="80" preserveAspectRatio="none" style={{ marginTop: 8, overflow: 'visible' }}>
+        <svg viewBox="0 0 480 90" width="100%" height="80" preserveAspectRatio="none" style={{ marginTop: 8, overflow: 'hidden' }}>
           <polyline points={area} fill="rgba(77,184,255,.08)" stroke="none" />
           <polyline points={spBig.map((p) => `${p.x},${p.y}`).join(' ')} fill="none" stroke="#4db8ff" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
           <circle cx={last.x} cy={last.y} r="4" fill="#5de1ff" />
