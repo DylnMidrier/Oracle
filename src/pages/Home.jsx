@@ -25,11 +25,14 @@ class HomeCanvas extends Component {
   veilleRef = createRef();
   _retHome = peekReturnFlag();
   _askSeq = 0;
+  _rec = null;
+  _sttOK = typeof window !== 'undefined' && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
   state = {
     value: '', phase: 'idle', response: '', listening: false, isMobile: false,
     booting: !this._retHome, bootStep: this._retHome ? 4 : 0,
     opening: null,
     asking: false, askQuestion: '', answer: null, askError: null,
+    voiceReply: typeof localStorage !== 'undefined' && localStorage.getItem('oracleVoiceReply') === '1',
   };
 
   componentDidMount() {
@@ -50,6 +53,8 @@ class HomeCanvas extends Component {
     clearTimeout(this._t1); clearTimeout(this._t2); clearTimeout(this._bt); clearTimeout(this._navT);
     if (this._raf) cancelAnimationFrame(this._raf);
     window.removeEventListener('resize', this._onResize);
+    try { this._rec?.abort(); } catch { /* noop */ }
+    window.speechSynthesis?.cancel();
   }
 
   _startClock() {
@@ -359,19 +364,80 @@ class HomeCanvas extends Component {
     });
   }
 
+  // Reconnaissance vocale (Web Speech API, fr-FR) : transcription live dans le
+  // champ, envoi automatique de la phrase finale quand l'écoute se termine.
+  toggleListen = () => {
+    if (this.state.listening) { try { this._rec?.stop(); } catch { /* noop */ } return; }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    this._warmupSpeech();
+    const rec = new SR();
+    this._rec = rec;
+    rec.lang = 'fr-FR';
+    rec.interimResults = true;
+    let final = '';
+    rec.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) final += t; else interim += t;
+      }
+      this.setState({ value: (final + interim).trim() });
+    };
+    rec.onend = () => {
+      this._rec = null;
+      this.setState({ listening: false });
+      if (final.trim()) this.submit(final);
+    };
+    this.setState({ listening: true, phase: 'idle', response: '' });
+    try { rec.start(); } catch { this._rec = null; this.setState({ listening: false }); }
+  };
+
+  toggleVoiceReply = () => {
+    const v = !this.state.voiceReply;
+    this.setState({ voiceReply: v });
+    try { localStorage.setItem('oracleVoiceReply', v ? '1' : '0'); } catch { /* noop */ }
+    if (v) this._warmupSpeech();
+    else window.speechSynthesis?.cancel();
+  };
+
+  // iOS n'autorise la synthèse vocale que dans la foulée d'un geste utilisateur :
+  // une énonciation vide pendant le tap débloque la lecture de la réponse async.
+  _warmupSpeech() {
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+    synth.cancel();
+    synth.speak(new SpeechSynthesisUtterance(''));
+  }
+
+  _speak(text) {
+    const synth = window.speechSynthesis;
+    if (!synth || !text) return;
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = 'fr-FR';
+    const voice = synth.getVoices().find((vo) => vo.lang && vo.lang.startsWith('fr'));
+    if (voice) u.voice = voice;
+    synth.speak(u);
+  }
+
   async submit(text) {
     text = (text || '').trim(); if (!text) return;
     clearTimeout(this._t1); clearTimeout(this._t2);
     this._burst();
+    try { this._rec?.abort(); } catch { /* noop */ }
+    if (this.state.voiceReply) this._warmupSpeech();
     const seq = ++this._askSeq;
     this.setState({ value: '', phase: 'thinking', listening: false, response: '', asking: 'thinking', askQuestion: text, answer: null, askError: null });
     const res = await askOracle(text);
     if (seq !== this._askSeq) return;
     this.setState({ phase: 'idle', asking: 'answered', answer: res?.reply || null, askError: res?.error || null });
+    if (this.state.voiceReply && res?.reply) this._speak(res.reply);
   }
 
   closeAsk() {
     this._askSeq += 1;
+    window.speechSynthesis?.cancel();
     this.setState({ asking: false, askQuestion: '', answer: null, askError: null });
   }
 
@@ -479,8 +545,11 @@ class HomeCanvas extends Component {
                 <div className="home-cmdbar">
                   <form onSubmit={onSubmit} className="home-cmdform">
                     <span style={{ color: 'var(--accent)', fontSize: 13 }}>▸</span>
-                    <input value={value} onChange={onInput} placeholder="ENTRER UNE COMMANDE" />
-                    <button type="button" onClick={() => this.setState((s) => ({ listening: !s.listening, phase: 'idle', response: '' }))} title="Vocal" className="home-vocal" style={{ color: this.state.listening ? 'var(--accent)' : '#3d5a75' }}>VOCAL</button>
+                    <input value={value} onChange={onInput} placeholder={this.state.listening ? 'JE VOUS ÉCOUTE…' : 'ENTRER UNE COMMANDE'} />
+                    {this._sttOK && (
+                      <button type="button" onClick={this.toggleListen} title="Parler au lieu d'écrire" className={`home-vocal${this.state.listening ? ' on rec' : ''}`}>{this.state.listening ? 'ÉCOUTE…' : 'VOCAL'}</button>
+                    )}
+                    <button type="button" onClick={this.toggleVoiceReply} title="Lire les réponses à voix haute" className={`home-vocal${this.state.voiceReply ? ' on' : ''}`}>VOIX {this.state.voiceReply ? 'ON' : 'OFF'}</button>
                     <button type="submit" title="Envoyer" className="home-send">⏵</button>
                   </form>
                 </div>
@@ -519,7 +588,11 @@ class HomeCanvas extends Component {
                 )}
                 <form onSubmit={onSubmit} className="home-cmdform" style={{ marginTop: 14 }}>
                   <span style={{ color: 'var(--accent)', fontSize: 13 }}>▸</span>
-                  <input value={value} onChange={onInput} placeholder="ENTRER UNE COMMANDE" />
+                  <input value={value} onChange={onInput} placeholder={this.state.listening ? 'JE VOUS ÉCOUTE…' : 'ENTRER UNE COMMANDE'} />
+                  {this._sttOK && (
+                    <button type="button" onClick={this.toggleListen} title="Parler au lieu d'écrire" className={`home-vocal${this.state.listening ? ' on rec' : ''}`}>{this.state.listening ? '●' : 'VOCAL'}</button>
+                  )}
+                  <button type="button" onClick={this.toggleVoiceReply} title="Lire les réponses à voix haute" className={`home-vocal${this.state.voiceReply ? ' on' : ''}`}>♪</button>
                   <button type="submit" title="Envoyer" className="home-send">⏵</button>
                 </form>
               </div>
