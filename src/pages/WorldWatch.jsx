@@ -37,6 +37,8 @@ export default function WorldWatch() {
   const dragRef = useRef(null);
   const draggedRef = useRef(false);
   const velRef = useRef(0);
+  const tiltRef = useRef(0.32);
+  const velYRef = useRef(0);
   const zoomRef = useRef(1);
   const offRef = useRef(0);
   const hitsRef = useRef([]);
@@ -86,11 +88,17 @@ export default function WorldWatch() {
       const target = (-selected.lon * Math.PI) / 180;
       let d = (((target - rotRef.current + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
       rotRef.current += d * 0.055;
+      tiltRef.current += (0.32 - tiltRef.current) * 0.055;
     } else {
       velRef.current *= 0.94;
       rotRef.current += 0.0016 + velRef.current;
+      velYRef.current *= 0.94;
+      // l'inclinaison revient doucement vers sa valeur de base
+      tiltRef.current += velYRef.current + (0.32 - tiltRef.current) * 0.01;
     }
+    tiltRef.current = Math.max(-1.3, Math.min(1.35, tiltRef.current));
     const rot = rotRef.current;
+    const tilt = tiltRef.current;
 
     // Zoom desktop sur la région du signal sélectionné (retour fluide à la fermeture)
     const zoomIn = selected && window.innerWidth > 900;
@@ -116,7 +124,7 @@ export default function WorldWatch() {
     ctx.strokeStyle = 'rgba(120,190,255,.07)'; ctx.lineWidth = 1; ctx.stroke();
 
     landDots().forEach((d) => {
-      const p = projectGlobe(d.la, d.lo, rot, R);
+      const p = projectGlobe(d.la, d.lo, rot, R, tilt);
       if (p.z <= 0.02) return;
       ctx.globalAlpha = 0.16 + 0.55 * p.z;
       ctx.fillStyle = '#7fc4ff';
@@ -128,12 +136,12 @@ export default function WorldWatch() {
     markers.forEach((m, i) => {
       const sv = SEV[m.sev];
       const la = (m.lat * Math.PI) / 180, lo = (m.lon * Math.PI) / 180;
-      const p = projectGlobe(la, lo, rot, R);
+      const p = projectGlobe(la, lo, rot, R, tilt);
       if (p.z <= 0.03) return;
       const sel = selectedId === m.id;
       const bx = cx + p.x, by = cy + p.y;
       const h = sel ? 0.3 : 0.16;
-      const tip = projectGlobe(la, lo, rot, R * (1 + h));
+      const tip = projectGlobe(la, lo, rot, R * (1 + h), tilt);
       const tx = cx + tip.x, ty = cy + tip.y;
       const vis = 0.35 + 0.65 * p.z;
 
@@ -189,17 +197,22 @@ export default function WorldWatch() {
   }, []);
 
   function handlePointerDown(e) {
-    dragRef.current = { x: e.clientX, tot: 0 };
+    dragRef.current = { x: e.clientX, y: e.clientY, tot: 0 };
     velRef.current = 0;
+    velYRef.current = 0;
     e.currentTarget.setPointerCapture(e.pointerId);
   }
   function handlePointerMove(e) {
     const d = dragRef.current; if (!d) return;
     const dx = e.clientX - d.x;
+    const dy = e.clientY - d.y;
     d.x = e.clientX;
-    d.tot += Math.abs(dx);
+    d.y = e.clientY;
+    d.tot += Math.abs(dx) + Math.abs(dy);
     rotRef.current += dx * 0.005;
+    tiltRef.current += dy * 0.005;
     velRef.current = dx * 0.005;
+    velYRef.current = dy * 0.005;
   }
   function handlePointerUp() {
     draggedRef.current = (dragRef.current?.tot ?? 0) > 5;

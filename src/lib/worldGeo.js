@@ -63,8 +63,7 @@ export function landDots() {
 }
 
 // Projection orthographique inclinée (même technique que la maquette).
-export function projectGlobe(la, lo, rot, R) {
-  const T = 0.32;
+export function projectGlobe(la, lo, rot, R, T = 0.32) {
   const x = Math.cos(la) * Math.sin(lo + rot);
   const y = Math.sin(la);
   const z = Math.cos(la) * Math.cos(lo + rot);
