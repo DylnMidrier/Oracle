@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="8" fill="#020509"/>
+  <defs>
+    <radialGradient id="g" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#4db8ff" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#4db8ff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- corner brackets -->
+  <path d="M11 17 V11 H17" fill="none" stroke="#4db8ff" stroke-width="2" stroke-linecap="round"/>
+  <path d="M47 11 H53 V17" fill="none" stroke="#4db8ff" stroke-width="2" stroke-linecap="round"/>
+  <path d="M53 47 V53 H47" fill="none" stroke="#4db8ff" stroke-width="2" stroke-linecap="round"/>
+  <path d="M17 53 H11 V47" fill="none" stroke="#4db8ff" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- glow -->
+  <circle cx="32" cy="32" r="20" fill="url(#g)"/>
+
+  <!-- ring -->
+  <circle cx="32" cy="32" r="18" fill="none" stroke="#3a5a78" stroke-width="2.4"/>
+  <path d="M14.6 26 A18 18 0 0 1 21 15.2" fill="none" stroke="#4db8ff" stroke-width="2.8" stroke-linecap="round"/>
+  <path d="M14.7 38.5 A18 18 0 0 0 26 49.2" fill="none" stroke="#4db8ff" stroke-width="2.8" stroke-linecap="round"/>
+  <path d="M42 48.4 A18 18 0 0 0 49.3 37" fill="none" stroke="#4db8ff" stroke-width="2.8" stroke-linecap="round"/>
+
+  <!-- diamond -->
+  <rect x="24" y="24" width="16" height="16" rx="2" fill="#eaf5ff" transform="rotate(45 32 32)"/>
+</svg>

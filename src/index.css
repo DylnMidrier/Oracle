@@ -1,0 +1,48 @@
+:root {
+  --bg: #020509;
+  --accent: #4db8ff;
+  --accent2: #5de1ff;
+  --ink: #d7e8f7;
+  --ink-bright: #eaf5ff;
+  --ink-dim: #7fa3c2;
+  --ink-dimmer: #5a7893;
+  --ink-faint: #3d5a75;
+  --line: rgba(120, 190, 255, .16);
+  --panel: rgba(10, 25, 45, .4);
+  --good: #4ade80;
+  --bad: #ff6b6b;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; background: var(--bg); overflow-x: hidden; }
+#root { min-height: 100vh; }
+body {
+  font-family: 'JetBrains Mono', monospace;
+  -webkit-font-smoothing: antialiased;
+  color: var(--ink);
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { color: #a8dcff; }
+input, button { font-family: 'JetBrains Mono', monospace; }
+button { font: inherit; }
+
+.hdg { font-family: 'Chakra Petch', sans-serif; }
+
+@keyframes pulsedot { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes unfold { 0% { clip-path: inset(49% 0 49% 0); opacity: .3; } 55% { clip-path: inset(0 0 0 0); opacity: 1; } 100% { clip-path: inset(0 0 0 0); opacity: 1; } }
+@keyframes sweep { 0% { transform: translateY(-40px); opacity: 0; } 12% { opacity: 1; } 100% { transform: translateY(900px); opacity: 0; } }
+@keyframes rowIn { from { opacity: 0; transform: translateX(-14px); filter: blur(4px); } to { opacity: 1; transform: translateX(0); filter: blur(0); } }
+@keyframes scan { 0% { transform: translateY(-100%); } 100% { transform: translateY(900px); } }
+@keyframes cardIn { from { opacity: 0; transform: translateY(16px) scale(.98); filter: blur(6px); } to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); } }
+
+.scrollbars ::-webkit-scrollbar { width: 6px; }
+.scrollbars ::-webkit-scrollbar-thumb { background: rgba(90, 170, 255, .2); border-radius: 3px; }
+
+/* ---- transitions "noyau" partagées (fermeture de module / retour Home) ---- */
+@keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+@keyframes coreBlurOut { from { opacity: 1; filter: blur(0); transform: scale(1); } to { opacity: 0; filter: blur(16px); transform: scale(1.015); } }
+@keyframes coreBlurIn { from { opacity: 0; filter: blur(16px); transform: scale(1.012); } to { opacity: 1; filter: blur(0); transform: scale(1); } }
+
+.core-blur-out { animation: coreBlurOut .5s cubic-bezier(.4, 0, .2, 1) both !important; pointer-events: none; }
+.core-blur-in { animation: coreBlurIn .65s cubic-bezier(.22, .61, .36, 1) both; }
