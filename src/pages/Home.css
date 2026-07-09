@@ -57,6 +57,10 @@
 .home-cmdbar { position: absolute; left: 50%; bottom: 44px; transform: translateX(-50%); width: min(92%, 680px); z-index: 5; }
 .home-cmdform { display: flex; align-items: center; gap: 13px; padding: 14px 20px; animation: rowIn .7s ease both; background: rgba(10, 25, 45, .42); border: 1px solid rgba(120, 190, 255, .2); border-radius: 4px; backdrop-filter: blur(16px); box-shadow: 0 0 40px rgba(30, 120, 220, .12); }
 .home-cmdform input { flex: 1; min-width: 0; background: transparent; border: none; outline: none; color: #eaf5ff; font-size: 13px; letter-spacing: .06em; }
+/* iOS zoome automatiquement sur un champ < 16px : on l'impose sur mobile */
+@media (max-width: 700px) {
+  .home-cmdform input { font-size: 16px; }
+}
 .home-vocal { cursor: pointer; border: 1px solid rgba(120, 190, 255, .25); background: transparent; padding: 5px 12px; border-radius: 2px; font-size: 9px; letter-spacing: .22em; }
 .home-send { cursor: pointer; border: none; background: transparent; color: var(--accent); font-size: 16px; padding: 0 2px; }
 

@@ -404,7 +404,12 @@ class HomeCanvas extends Component {
     ];
     const value = this.state.value;
     const onInput = (e) => this.setState({ value: e.target.value });
-    const onSubmit = (e) => { e.preventDefault(); this.submit(value); };
+    const onSubmit = (e) => {
+      e.preventDefault();
+      // referme le clavier iOS (et son zoom éventuel) au moment de l'envoi
+      e.currentTarget.querySelector('input')?.blur();
+      this.submit(value);
+    };
     const dateStr = d.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' }).toUpperCase();
 
     return (
