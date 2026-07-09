@@ -34,6 +34,11 @@ export default function WorldWatch() {
   const stageRef = useRef(null);
   const rafRef = useRef(null);
   const rotRef = useRef(2.2);
+  const dragRef = useRef(null);
+  const draggedRef = useRef(false);
+  const velRef = useRef(0);
+  const zoomRef = useRef(1);
+  const offRef = useRef(0);
   const hitsRef = useRef([]);
   const tRef = useRef(0);
 
@@ -73,16 +78,28 @@ export default function WorldWatch() {
     if (!W || !H) return;
     tRef.current += 0.016;
     const t = tRef.current;
-    const cx = W / 2, cy = H / 2, R = Math.min(W, H) * 0.38;
+    const R0 = Math.min(W, H) * 0.38;
 
-    if (selected) {
+    if (dragRef.current) {
+      // rotation pilotée par le pointeur (voir handlers du canvas)
+    } else if (selected) {
       const target = (-selected.lon * Math.PI) / 180;
       let d = (((target - rotRef.current + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) - Math.PI;
       rotRef.current += d * 0.055;
     } else {
-      rotRef.current += 0.0016;
+      velRef.current *= 0.94;
+      rotRef.current += 0.0016 + velRef.current;
     }
     const rot = rotRef.current;
+
+    // Zoom desktop sur la région du signal sélectionné (retour fluide à la fermeture)
+    const zoomIn = selected && window.innerWidth > 900;
+    const zTarget = zoomIn ? 1.7 : 1;
+    zoomRef.current += (zTarget - zoomRef.current) * 0.06;
+    const offTarget = zoomIn ? R0 * zTarget * Math.sin((selected.lat * Math.PI) / 180) * 0.85 : 0;
+    offRef.current += (offTarget - offRef.current) * 0.06;
+    const R = R0 * zoomRef.current;
+    const cx = W / 2, cy = H / 2 + offRef.current;
 
     ctx.clearRect(0, 0, W, H);
 
@@ -171,7 +188,26 @@ export default function WorldWatch() {
     return () => observer.disconnect();
   }, []);
 
+  function handlePointerDown(e) {
+    dragRef.current = { x: e.clientX, tot: 0 };
+    velRef.current = 0;
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+  function handlePointerMove(e) {
+    const d = dragRef.current; if (!d) return;
+    const dx = e.clientX - d.x;
+    d.x = e.clientX;
+    d.tot += Math.abs(dx);
+    rotRef.current += dx * 0.005;
+    velRef.current = dx * 0.005;
+  }
+  function handlePointerUp() {
+    draggedRef.current = (dragRef.current?.tot ?? 0) > 5;
+    dragRef.current = null;
+  }
+
   function handleCanvasClick(e) {
+    if (draggedRef.current) { draggedRef.current = false; return; }
     const canvas = canvasRef.current; if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left, y = e.clientY - rect.top;
@@ -204,7 +240,15 @@ export default function WorldWatch() {
 
       <div className="ww-body">
         <div className="ww-stage" ref={stageRef}>
-          <canvas ref={canvasRef} className="ww-canvas" onClick={handleCanvasClick} />
+          <canvas
+            ref={canvasRef}
+            className="ww-canvas"
+            onClick={handleCanvasClick}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+          />
 
           {!loading && articles.length === 0 && (
             <div className="ww-empty">
