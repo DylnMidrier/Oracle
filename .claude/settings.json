@@ -78,7 +78,9 @@
       "Bash(echo \"exit:$?\")",
       "Bash(git check-ignore *)",
       "Bash(git add *)",
-      "Bash(rm /Users/dylan/Oracle/.git/index.lock && git add .claude/ .gitignore .mcp.json README.md index.html package-lock.json package.json public/ src/ supabase/ vite.config.js && git status)"
+      "Bash(rm /Users/dylan/Oracle/.git/index.lock && git add .claude/ .gitignore .mcp.json README.md index.html package-lock.json package.json public/ src/ supabase/ vite.config.js && git status)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
     ],
     "additionalDirectories": [
       "/Users/dylan/Oracle/supabase/functions",

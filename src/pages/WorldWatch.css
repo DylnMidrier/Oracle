@@ -58,7 +58,7 @@
   .ww-body { flex-direction: column; }
   .ww-stage { flex: 0 0 46vh; }
   .ww-feed { flex: 1; border-left: none; border-top: 1px solid var(--line); }
-  .ww-intel { left: 12px; right: 12px; top: auto; bottom: 12px; width: auto; }
+  .ww-intel { left: 12px; right: 12px; top: auto; bottom: 12px; width: auto; max-height: calc(100% - 24px); overflow-y: auto; }
 }
 
 @media (max-width: 560px) {
