@@ -578,7 +578,10 @@ class HomeCanvas extends Component {
     clearTimeout(this._silenceT);
     const text = (this._finalTranscript || this.state.value || '').trim();
     const err = this._recError;
-    try { this._rec?.stop(); } catch { /* noop */ }
+    // abort() plutôt que stop() : libère immédiatement la session micro (stop() attend la
+    // fin du traitement, ce qui bloque le redémarrage suivant sur iOS). La transcription
+    // est déjà accumulée en direct via onresult, on ne perd rien.
+    try { this._rec?.abort(); } catch { /* noop */ }
     this._rec = null;
     this.setState({ listening: false });
     if (text) { this.submit(text); return; }
@@ -601,8 +604,14 @@ class HomeCanvas extends Component {
     const synth = window.speechSynthesis;
     if (synth) { synth.cancel(); synth.speak(new SpeechSynthesisUtterance('')); }
     if (!this._audioEl) this._audioEl = new Audio();
-    this._audioEl.src = SILENT_WAV;
-    this._audioEl.play().catch(() => { /* ignoré : au pire on retombera sur la voix système */ });
+    const a = this._audioEl;
+    // CRUCIAL : purger les handlers de la lecture précédente. Sinon le onended de la
+    // dernière réponse (qui ferme la modale et invalide la requête en cours via closeAsk)
+    // se redéclencherait à la fin de ce clip silencieux et tuerait la commande suivante.
+    a.onended = null;
+    a.onerror = null;
+    a.src = SILENT_WAV;
+    a.play().catch(() => { /* ignoré : au pire on retombera sur la voix système */ });
   }
 
   _stopSpeech() {
@@ -621,7 +630,7 @@ class HomeCanvas extends Component {
         if (!this._audioEl) this._audioEl = new Audio();
         const audio = this._audioEl;
         const url = URL.createObjectURL(blob);
-        const cleanup = () => { URL.revokeObjectURL(url); if (onDone) onDone(); };
+        const cleanup = () => { audio.onended = null; audio.onerror = null; URL.revokeObjectURL(url); if (onDone) onDone(); };
         audio.onended = cleanup;
         audio.onerror = cleanup;
         audio.src = url;
