@@ -51,7 +51,6 @@ class HomeCanvas extends Component {
     opening: null,
     asking: false, askQuestion: '', answer: null, askError: null,
     voiceReply: typeof localStorage !== 'undefined' && localStorage.getItem('oracleVoiceReply') === '1',
-    voices: [], voiceURI: (typeof localStorage !== 'undefined' && localStorage.getItem('oracleVoiceURI')) || '',
     taskSummary: { count: 0, top: null },
     nextSession: { groupe: 'Jambes', jour: '18:00' },
   };
@@ -192,21 +191,12 @@ class HomeCanvas extends Component {
     if (this._retHome) clearReturnFlag();
     else this._startBoot();
     this._initCanvas();
-    this._loadVoices();
-    if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = this._loadVoices;
     this._loadTaskSummary();
   }
 
   _loadTaskSummary = async () => {
     const s = await fetchTaskSummary();
     this.setState({ taskSummary: s });
-  };
-
-  _loadVoices = () => {
-    const synth = window.speechSynthesis;
-    if (!synth) return;
-    const voices = synth.getVoices().filter((v) => v.lang && v.lang.toLowerCase().startsWith('fr'));
-    if (voices.length) this.setState({ voices });
   };
 
   componentWillUnmount() {
@@ -604,12 +594,6 @@ class HomeCanvas extends Component {
     else this._stopSpeech();
   };
 
-  onVoiceChange = (e) => {
-    const uri = e.target.value;
-    this.setState({ voiceURI: uri });
-    try { localStorage.setItem('oracleVoiceURI', uri); } catch { /* noop */ }
-  };
-
   // iOS n'autorise la lecture programmatique (voix système ou <audio>) que dans la
   // foulée d'un geste utilisateur : on débloque les deux pistes ici (une énonciation
   // vide + un clip audio silencieux), pour que la lecture async de la réponse marche.
@@ -654,8 +638,7 @@ class HomeCanvas extends Component {
     synth.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = 'fr-FR';
-    const pool = this.state.voices.length ? this.state.voices : synth.getVoices().filter((v) => v.lang && v.lang.startsWith('fr'));
-    const voice = pool.find((v) => v.voiceURI === this.state.voiceURI) || pool[0];
+    const voice = synth.getVoices().find((v) => v.lang && v.lang.startsWith('fr'));
     if (voice) u.voice = voice;
     if (onDone) { u.onend = onDone; u.onerror = onDone; }
     synth.speak(u);
@@ -831,11 +814,6 @@ class HomeCanvas extends Component {
                       <button type="button" onClick={this.toggleListen} title="Parler au lieu d'écrire" className={`home-vocal${this.state.listening ? ' on rec' : ''}`}>{this.state.listening ? 'ÉCOUTE…' : 'VOCAL'}</button>
                     )}
                     <button type="button" onClick={this.toggleVoiceReply} title="Lire les réponses à voix haute" className={`home-vocal${this.state.voiceReply ? ' on' : ''}`}>VOIX {this.state.voiceReply ? 'ON' : 'OFF'}</button>
-                    {this.state.voiceReply && this.state.voices.length > 1 && (
-                      <select className="home-voice-select" value={this.state.voiceURI} onChange={this.onVoiceChange} title="Choisir la voix">
-                        {this.state.voices.map((v) => <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>)}
-                      </select>
-                    )}
                     <button type="submit" title="Envoyer" className="home-send">⏵</button>
                   </form>
                 </div>
@@ -879,11 +857,6 @@ class HomeCanvas extends Component {
                     <button type="button" onClick={this.toggleListen} title="Parler au lieu d'écrire" className={`home-vocal${this.state.listening ? ' on rec' : ''}`}>{this.state.listening ? '●' : 'VOCAL'}</button>
                   )}
                   <button type="button" onClick={this.toggleVoiceReply} title="Lire les réponses à voix haute" className={`home-vocal${this.state.voiceReply ? ' on' : ''}`}>♪</button>
-                  {this.state.voiceReply && this.state.voices.length > 1 && (
-                    <select className="home-voice-select" value={this.state.voiceURI} onChange={this.onVoiceChange} title="Choisir la voix">
-                      {this.state.voices.map((v) => <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>)}
-                    </select>
-                  )}
                   <button type="submit" title="Envoyer" className="home-send">⏵</button>
                 </form>
               </div>
