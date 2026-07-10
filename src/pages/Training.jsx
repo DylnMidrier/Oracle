@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { SESSIONS } from '../data/sessions.js';
 import { supabase, supabaseReady } from '../lib/supabase.js';
 import { fmtTime, buildExerciseContext, sparkPoints } from '../lib/trainingStats.js';
@@ -15,14 +16,18 @@ function todayISO() {
 
 export default function Training() {
   const { closing, goHome } = useCoreClose();
+  const location = useLocation();
   const [history, setHistory] = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(supabaseReady);
   const [templates, setTemplates] = useState(SESSIONS);
 
-  const [screen, setScreen] = useState('select'); // select | module | calendar | recap | confirmSwap
+  // select | module | calendar | recap | confirmSwap — la carte AGENDA de la Home
+  // navigue ici en demandant directement l'écran calendrier (même agenda, pas de doublon).
+  const [screen, setScreen] = useState(location.state?.initialScreen || 'select');
   const [sessionKey, setSessionKey] = useState(null);
   const [checks, setChecks] = useState({});
   const [weights, setWeights] = useState({});
+  const [repsOverride, setRepsOverride] = useState({});
   const [rpe, setRpe] = useState({});
   const [active, setActive] = useState(0);
   const [timer, setTimer] = useState(0);
@@ -71,9 +76,9 @@ export default function Training() {
   function selectSession(key) {
     const s = templates[key];
     const ctx = buildExerciseContext(history, key, s.exercises);
-    const w = {};
-    s.exercises.forEach((ex, ei) => ex.reps.forEach((_, si) => { w[`${ei}_${si}`] = String(ctx[ei].defaultWeight); }));
-    setSessionKey(key); setWeights(w); setChecks({}); setRpe({}); setActive(0); setTimer(0); setTimerTotal(0); setSwaps({});
+    const w = {}; const r = {};
+    s.exercises.forEach((ex, ei) => ex.reps.forEach((baseReps, si) => { w[`${ei}_${si}`] = String(ctx[ei].defaultWeight); r[`${ei}_${si}`] = String(baseReps); }));
+    setSessionKey(key); setWeights(w); setRepsOverride(r); setChecks({}); setRpe({}); setActive(0); setTimer(0); setTimerTotal(0); setSwaps({});
     setScreen('module');
   }
 
@@ -118,6 +123,8 @@ export default function Training() {
   }
   function setWeight(key, val) { setWeights((w) => ({ ...w, [key]: val })); }
   function stepWeight(key, d) { setWeights((w) => ({ ...w, [key]: String(Math.max(0, (parseFloat(w[key]) || 0) + d)) })); }
+  function setRepCount(key, val) { setRepsOverride((r) => ({ ...r, [key]: val })); }
+  function stepRepCount(key, base, d) { setRepsOverride((r) => ({ ...r, [key]: String(Math.max(1, (parseInt(r[key], 10) || base) + d)) })); }
   function toggleRpe(ei, n) { setRpe((r) => ({ ...r, [ei]: r[ei] === n ? null : n })); }
 
   let doneSets = 0, totalSets = 0;
@@ -131,7 +138,10 @@ export default function Training() {
     const data = {
       exercises: exercises.map((ex, ei) => ({
         name: ex.name, note: ex.note, target: ex.target, rpe: rpe[ei] || null,
-        sets: ex.reps.map((reps, si) => ({ reps, weight: Number(weights[`${ei}_${si}`]) || 0, checked: !!checks[`${ei}_${si}`] })),
+        sets: ex.reps.map((baseReps, si) => {
+          const k = `${ei}_${si}`;
+          return { reps: parseInt(repsOverride[k], 10) || baseReps, weight: Number(weights[k]) || 0, checked: !!checks[k] };
+        }),
       })),
     };
     if (supabaseReady) {
@@ -258,8 +268,9 @@ export default function Training() {
 
             <ExerciseDetail
               ei={active} ex={exercises[active]} ctx={exCtx[active]}
-              checks={checks} weights={weights} rpeSel={rpe[active]}
-              onToggleSet={toggleSet} onSetWeight={setWeight} onStepWeight={stepWeight} onSetRpe={(n) => toggleRpe(active, n)}
+              checks={checks} weights={weights} repsOverride={repsOverride} rpeSel={rpe[active]}
+              onToggleSet={toggleSet} onSetWeight={setWeight} onStepWeight={stepWeight}
+              onSetReps={setRepCount} onStepReps={stepRepCount} onSetRpe={(n) => toggleRpe(active, n)}
               hasPrev={active > 0} hasNext={active < exercises.length - 1}
               onPrev={() => setActive((a) => Math.max(0, a - 1))} onNext={() => setActive((a) => Math.min(exercises.length - 1, a + 1))}
               onReplace={() => openPicker(active)}
@@ -391,7 +402,7 @@ export default function Training() {
   );
 }
 
-function ExerciseDetail({ ei, ex, ctx, checks, weights, rpeSel, onToggleSet, onSetWeight, onStepWeight, onSetRpe, hasPrev, hasNext, onPrev, onNext, onReplace }) {
+function ExerciseDetail({ ei, ex, ctx, checks, weights, repsOverride, rpeSel, onToggleSet, onSetWeight, onStepWeight, onSetReps, onStepReps, onSetRpe, hasPrev, hasNext, onPrev, onNext, onReplace }) {
   const delta = ctx.delta;
   const dCol = delta > 0 ? '#4ade80' : delta < 0 ? '#ff6b6b' : '#7fa3c2';
   const dArrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '=';
@@ -429,14 +440,20 @@ function ExerciseDetail({ ei, ex, ctx, checks, weights, rpeSel, onToggleSet, onS
       </div>
 
       <div className="tr-sets">
-        {ex.reps.map((reps, si) => {
+        {ex.reps.map((baseReps, si) => {
           const key = `${ei}_${si}`;
           const checked = !!checks[key];
           const weight = weights[key] != null ? weights[key] : String(ctx.defaultWeight);
+          const repsVal = repsOverride[key] != null ? repsOverride[key] : String(baseReps);
           return (
             <div key={si} className={`tr-setrow${checked ? ' done' : ''}`}>
               <span className="lbl">SÉRIE {si + 1}</span>
-              <span className="reps">× {reps} rép</span>
+              <div className="tr-reps-ctl">
+                <button onClick={() => onStepReps(key, baseReps, -1)}>−</button>
+                <input value={repsVal} onChange={(e) => onSetReps(key, e.target.value)} />
+                <button onClick={() => onStepReps(key, baseReps, 1)}>+</button>
+                <span className="unit">rép</span>
+              </div>
               <div className="tr-weight-ctl">
                 <button onClick={() => onStepWeight(key, -2.5)}>−</button>
                 <input value={weight} onChange={(e) => onSetWeight(key, e.target.value)} />

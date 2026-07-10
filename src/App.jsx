@@ -3,6 +3,7 @@ import Home from './pages/Home.jsx';
 import Training from './pages/Training.jsx';
 import Health from './pages/Health.jsx';
 import WorldWatch from './pages/WorldWatch.jsx';
+import Taches from './pages/Taches.jsx';
 
 function App() {
   return (
@@ -12,6 +13,7 @@ function App() {
         <Route path="/entrainement" element={<Training />} />
         <Route path="/sante" element={<Health />} />
         <Route path="/veille" element={<WorldWatch />} />
+        <Route path="/taches" element={<Taches />} />
       </Routes>
     </HashRouter>
   );

@@ -2,7 +2,21 @@ import { Component, createRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { peekReturnFlag, clearReturnFlag } from '../lib/coreTransition.js';
 import { askOracle } from '../lib/oracleChat.js';
+import { supabase, supabaseReady } from '../lib/supabase.js';
+import { SESSIONS } from '../data/sessions.js';
+import { fetchTaskSummary, createTask } from '../lib/tasks.js';
+import { synthesizeSpeech } from '../lib/tts.js';
 import './Home.css';
+
+// Clip audio silencieux (WAV valide, 0 échantillon) utilisé pour débloquer la lecture
+// programmatique sur iOS/Safari : doit être joué une première fois dans la foulée d'un
+// geste utilisateur pour que les lectures async ultérieures (réponse de Claude) marchent.
+const SILENT_WAV = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+
+function slugify(s) {
+  return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '') || 'seance';
+}
 
 const USER_NAME = 'Dylan';
 const ACCENT = '#4db8ff';
@@ -23,9 +37,13 @@ class HomeCanvas extends Component {
   santeRef = createRef();
   trainRef = createRef();
   veilleRef = createRef();
+  tachesRef = createRef();
+  agendaRef = createRef();
   _retHome = peekReturnFlag();
   _askSeq = 0;
   _rec = null;
+  _lastRecEnd = 0; // horodatage de fin de la dernière écoute, pour espacer un redémarrage trop rapide
+  _history = []; // 5 derniers échanges (10 messages) envoyés à Claude pour le contexte
   _sttOK = typeof window !== 'undefined' && !!(window.SpeechRecognition || window.webkitSpeechRecognition);
   state = {
     value: '', phase: 'idle', response: '', listening: false, isMobile: false,
@@ -33,7 +51,135 @@ class HomeCanvas extends Component {
     opening: null,
     asking: false, askQuestion: '', answer: null, askError: null,
     voiceReply: typeof localStorage !== 'undefined' && localStorage.getItem('oracleVoiceReply') === '1',
+    voices: [], voiceURI: (typeof localStorage !== 'undefined' && localStorage.getItem('oracleVoiceURI')) || '',
+    taskSummary: { count: 0, top: null },
+    nextSession: { groupe: 'Jambes', jour: '18:00' },
   };
+
+  // Catalogue de commandes déclenchables par Oracle depuis la barre de commande.
+  // Chaque tool porte son schéma (envoyé à Claude) et son exécution réelle (run),
+  // qui agit directement sur l'état du composant pour que le HUD se mette à jour.
+  TOOLS = [
+    {
+      name: 'ouvrir_module',
+      description: "Ouvre un module de l'interface Oracle (santé, entraînement ou veille mondiale) et y navigue.",
+      input_schema: {
+        type: 'object',
+        properties: { module: { type: 'string', enum: ['sante', 'entrainement', 'veille'], description: 'Module à ouvrir' } },
+        required: ['module'],
+      },
+      run: (input) => {
+        const map = {
+          sante: [this.santeRef, 'SANTÉ', '/sante'],
+          entrainement: [this.trainRef, 'ENTRAÎNEMENT', '/entrainement'],
+          veille: [this.veilleRef, 'VEILLE MONDIALE', '/veille'],
+        };
+        const m = map[input?.module];
+        if (m) this.openModule(...m);
+        return { ok: !!m, module: input?.module };
+      },
+    },
+    {
+      name: 'ajouter_seance',
+      description: "Planifie une séance d'entraînement (groupe musculaire + jour/heure), avec le détail des exercices " +
+        "s'ils sont précisés (nom, poids, séries, répétitions). Met à jour le HUD et crée une vraie séance utilisable " +
+        'dans le module Entraînement.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          groupe: { type: 'string', description: 'Groupe musculaire ou nom de la séance, ex: jambes, upper, dos' },
+          jour: { type: 'string', description: 'Jour et/ou heure prévue, ex: jeudi 18:00' },
+          exercices: {
+            type: 'array',
+            description: 'Exercices mentionnés pour cette séance, si précisés',
+            items: {
+              type: 'object',
+              properties: {
+                nom: { type: 'string', description: "Nom de l'exercice, ex: développé couché barre" },
+                poids: { type: 'number', description: 'Charge en kg' },
+                series: { type: 'integer', description: 'Nombre de séries' },
+                repetitions: { type: 'integer', description: 'Répétitions par série' },
+              },
+              required: ['nom'],
+            },
+          },
+        },
+        required: ['groupe', 'jour'],
+      },
+      run: async (input) => {
+        const groupe = String(input?.groupe || '').trim() || 'Séance';
+        const jour = String(input?.jour || '').trim() || 'à définir';
+        const exercises = (Array.isArray(input?.exercices) ? input.exercices : []).map((e) => {
+          const series = Number(e.series) > 0 ? Math.round(Number(e.series)) : 3;
+          const reps = Number(e.repetitions) > 0 ? Math.round(Number(e.repetitions)) : 10;
+          const poids = Number(e.poids) || 0;
+          return { name: String(e.nom || 'Exercice').trim(), note: '', target: `${series} × ${reps}`, prev: poids, pr: poids, rest: 90, reps: Array(series).fill(reps) };
+        });
+
+        this.setState({ nextSession: { groupe, jour } });
+        if (!supabaseReady) return { ok: true, groupe, jour, exercices: exercises.map((e) => e.name), saved: false };
+
+        try {
+          // dès qu'une ligne existe dans session_templates, le module Entraînement n'affiche
+          // plus QUE les lignes en base : on doit d'abord y semer upper/lower par défaut.
+          const { data: existing } = await supabase.from('session_templates').select('key');
+          if (!existing || existing.length === 0) {
+            await supabase.from('session_templates').insert(
+              Object.entries(SESSIONS).map(([k, v]) => ({ key: k, meta: v.meta, exercises: v.exercises })),
+            );
+          }
+          const key = `${slugify(groupe)}_${Date.now().toString(36)}`;
+          const meta = { name: groupe.toUpperCase(), tag: 'SÉANCE // AJOUTÉE PAR ORACLE', sub: jour, glyph: groupe.trim().charAt(0).toUpperCase() || 'S', dur: '~45 min' };
+          const { error } = await supabase.from('session_templates').insert({ key, meta, exercises });
+          if (error) return { ok: false, groupe, jour, exercices: exercises.map((e) => e.name), saved: false, error: error.message };
+          return { ok: true, groupe, jour, exercices: exercises.map((e) => e.name), saved: true };
+        } catch (err) {
+          return { ok: false, groupe, jour, exercices: exercises.map((e) => e.name), saved: false, error: String(err?.message || err) };
+        }
+      },
+    },
+    {
+      name: 'ajouter_tache',
+      description: 'Crée une vraie tâche dans le module Tâches (priorité, catégorie, échéance, note si précisées).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          tache: { type: 'string', description: 'Intitulé de la tâche à ajouter' },
+          priorite: { type: 'string', enum: ['p1', 'p2', 'p3'], description: 'p1 = critique, p2 = haute, p3 = normale (défaut si non précisé)' },
+          categorie: { type: 'string', description: 'Catégorie courte, ex : DOSSIER, COMM, ADMIN, SÉCURITÉ' },
+          echeance_iso: { type: 'string', description: "Date/heure d'échéance au format ISO 8601 si déductible de la commande (sinon, omettre ce champ)" },
+          note: { type: 'string', description: 'Courte synthèse ou précision sur la tâche, si utile' },
+        },
+        required: ['tache'],
+      },
+      run: async (input) => {
+        const tache = String(input?.tache || '').trim();
+        if (!tache) return { ok: false, error: 'Intitulé manquant' };
+        const { data, error } = await createTask({
+          title: tache,
+          category: input?.categorie ? String(input.categorie).toUpperCase() : null,
+          priority: input?.priorite,
+          dueAt: input?.echeance_iso || null,
+          note: input?.note ? String(input.note) : null,
+        });
+        if (data) this._loadTaskSummary();
+        return { ok: !!data, tache, saved: !!data, error: error || undefined };
+      },
+    },
+    {
+      name: 'statut_systeme',
+      description: "Consulte l'état actuel du système (énergie, alertes, séance prévue, tâches) pour répondre aux questions de synthèse (ex : « résume ma journée »).",
+      input_schema: { type: 'object', properties: {} },
+      run: () => ({
+        energie: '82 %',
+        sommeil: '7 h 20',
+        prochaine_seance: `${this.state.nextSession.groupe} · ${this.state.nextSession.jour}`,
+        taches_en_cours: this.state.taskSummary.count,
+        tache_prioritaire: this.state.taskSummary.top,
+        prochain_evenement: 'Standup à 09:30, 5 événements',
+      }),
+    },
+  ];
 
   componentDidMount() {
     this.setState({ isMobile: window.innerWidth < 900 });
@@ -46,15 +192,31 @@ class HomeCanvas extends Component {
     if (this._retHome) clearReturnFlag();
     else this._startBoot();
     this._initCanvas();
+    this._loadVoices();
+    if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = this._loadVoices;
+    this._loadTaskSummary();
   }
+
+  _loadTaskSummary = async () => {
+    const s = await fetchTaskSummary();
+    this.setState({ taskSummary: s });
+  };
+
+  _loadVoices = () => {
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+    const voices = synth.getVoices().filter((v) => v.lang && v.lang.toLowerCase().startsWith('fr'));
+    if (voices.length) this.setState({ voices });
+  };
 
   componentWillUnmount() {
     clearInterval(this._clockTimer);
-    clearTimeout(this._t1); clearTimeout(this._t2); clearTimeout(this._bt); clearTimeout(this._navT);
+    clearTimeout(this._t1); clearTimeout(this._t2); clearTimeout(this._bt); clearTimeout(this._navT); clearTimeout(this._silenceT); clearTimeout(this._recStartT);
     if (this._raf) cancelAnimationFrame(this._raf);
     window.removeEventListener('resize', this._onResize);
+    this._recActive = false;
     try { this._rec?.abort(); } catch { /* noop */ }
-    window.speechSynthesis?.cancel();
+    this._stopSpeech();
   }
 
   _startClock() {
@@ -346,7 +508,7 @@ class HomeCanvas extends Component {
     this._t2 = setTimeout(() => this.setState({ phase: 'idle', response: '' }), 6500);
   }
 
-  openModule(ref, label, path) {
+  openModule(ref, label, path, navState) {
     if (this.state.opening) return;
     clearTimeout(this._t1); clearTimeout(this._t2);
     this._burst();
@@ -360,37 +522,78 @@ class HomeCanvas extends Component {
           { left: '0px', top: '0px', width: `${window.innerWidth}px`, height: `${window.innerHeight}px` },
         ], { duration: 680, easing: 'cubic-bezier(.72,0,.2,1)', fill: 'both', delay: 200 });
       }
-      this._navT = setTimeout(() => this.props.navigate(path), 1350);
+      this._navT = setTimeout(() => this.props.navigate(path, navState ? { state: navState } : undefined), 1350);
     });
   }
 
-  // Reconnaissance vocale (Web Speech API, fr-FR) : transcription live dans le
-  // champ, envoi automatique de la phrase finale quand l'écoute se termine.
+  // Reconnaissance vocale (Web Speech API, fr-FR) : transcription live dans le champ.
+  // La fin d'écoute est déclenchée par NOUS (silence de ~2,2 s ou re-clic sur le bouton)
+  // plutôt que par l'événement `onend` du navigateur, qui n'est pas fiable partout
+  // (sur Safari iOS notamment, la reconnaissance peut ne jamais s'arrêter seule).
   toggleListen = () => {
-    if (this.state.listening) { try { this._rec?.stop(); } catch { /* noop */ } return; }
+    if (this.state.listening) { this._finishListening(); return; }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
     this._warmupSpeech();
+    this.setState({ listening: true, phase: 'idle', response: '', value: '' });
+    // La plupart des navigateurs (Chrome en tête) n'autorisent qu'UNE session de
+    // reconnaissance active à la fois, même entre deux instances distinctes : si on
+    // relance trop vite après la fin de la précédente, le démarrage échoue en silence.
+    // On laisse un court délai de sécurité au navigateur pour bien libérer la session.
+    const wait = Math.max(0, 400 - (Date.now() - this._lastRecEnd));
+    this._recStartT = setTimeout(() => this._startRecognition(SR), wait);
+  };
+
+  _startRecognition(SR) {
     const rec = new SR();
     this._rec = rec;
+    this._recActive = true;
+    this._finalTranscript = '';
+    this._recError = null;
     rec.lang = 'fr-FR';
+    rec.continuous = true;
     rec.interimResults = true;
-    let final = '';
     rec.onresult = (e) => {
       let interim = '';
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) final += t; else interim += t;
+        if (e.results[i].isFinal) this._finalTranscript += t; else interim += t;
       }
-      this.setState({ value: (final + interim).trim() });
+      this.setState({ value: (this._finalTranscript + interim).trim() });
+      clearTimeout(this._silenceT);
+      this._silenceT = setTimeout(() => this._finishListening(), 2200);
     };
-    rec.onend = () => {
-      this._rec = null;
+    rec.onerror = (e) => { this._recError = e.error; this._finishListening(); };
+    rec.onend = () => this._finishListening();
+    clearTimeout(this._silenceT);
+    this._silenceT = setTimeout(() => this._finishListening(), 7000); // délai de grâce si aucun son n'est capté
+    try {
+      rec.start();
+    } catch {
+      this._recActive = false; this._rec = null;
       this.setState({ listening: false });
-      if (final.trim()) this.submit(final);
-    };
-    this.setState({ listening: true, phase: 'idle', response: '' });
-    try { rec.start(); } catch { this._rec = null; this.setState({ listening: false }); }
+      this._showAnswer(null, 'liaison vocale indisponible — réessaie dans un instant');
+    }
+  }
+
+  _finishListening = () => {
+    clearTimeout(this._recStartT);
+    if (!this._recActive) {
+      // Annulation pendant le court délai de sécurité, avant même le démarrage réel.
+      if (this.state.listening) this.setState({ listening: false });
+      return;
+    }
+    this._recActive = false;
+    this._lastRecEnd = Date.now();
+    clearTimeout(this._silenceT);
+    const text = (this._finalTranscript || this.state.value || '').trim();
+    const err = this._recError;
+    try { this._rec?.stop(); } catch { /* noop */ }
+    this._rec = null;
+    this.setState({ listening: false });
+    if (text) { this.submit(text); return; }
+    // 'no-speech' = silence normal (grâce à notre propre minuteur) : pas la peine d'alerter.
+    if (err && err !== 'no-speech') this._showAnswer(null, `liaison vocale interrompue (${err}) — réessaie`);
   };
 
   toggleVoiceReply = () => {
@@ -398,27 +601,77 @@ class HomeCanvas extends Component {
     this.setState({ voiceReply: v });
     try { localStorage.setItem('oracleVoiceReply', v ? '1' : '0'); } catch { /* noop */ }
     if (v) this._warmupSpeech();
-    else window.speechSynthesis?.cancel();
+    else this._stopSpeech();
   };
 
-  // iOS n'autorise la synthèse vocale que dans la foulée d'un geste utilisateur :
-  // une énonciation vide pendant le tap débloque la lecture de la réponse async.
+  onVoiceChange = (e) => {
+    const uri = e.target.value;
+    this.setState({ voiceURI: uri });
+    try { localStorage.setItem('oracleVoiceURI', uri); } catch { /* noop */ }
+  };
+
+  // iOS n'autorise la lecture programmatique (voix système ou <audio>) que dans la
+  // foulée d'un geste utilisateur : on débloque les deux pistes ici (une énonciation
+  // vide + un clip audio silencieux), pour que la lecture async de la réponse marche.
   _warmupSpeech() {
     const synth = window.speechSynthesis;
-    if (!synth) return;
-    synth.cancel();
-    synth.speak(new SpeechSynthesisUtterance(''));
+    if (synth) { synth.cancel(); synth.speak(new SpeechSynthesisUtterance('')); }
+    if (!this._audioEl) this._audioEl = new Audio();
+    this._audioEl.src = SILENT_WAV;
+    this._audioEl.play().catch(() => { /* ignoré : au pire on retombera sur la voix système */ });
   }
 
-  _speak(text) {
+  _stopSpeech() {
+    if (this._audioEl) { try { this._audioEl.pause(); } catch { /* noop */ } }
+    window.speechSynthesis?.cancel();
+  }
+
+  // Voix OpenAI TTS en priorité (naturelle, gère bien la ponctuation) ; repli sur la
+  // voix système du navigateur si la synthèse échoue ou n'est pas configurée.
+  _speak(text, onDone) {
+    const clean = (text || '').replace(/[*_`#]/g, '').trim();
+    if (!clean) { if (onDone) onDone(); return; }
+    this._stopSpeech();
+    synthesizeSpeech(clean).then((blob) => {
+      if (blob) {
+        if (!this._audioEl) this._audioEl = new Audio();
+        const audio = this._audioEl;
+        const url = URL.createObjectURL(blob);
+        const cleanup = () => { URL.revokeObjectURL(url); if (onDone) onDone(); };
+        audio.onended = cleanup;
+        audio.onerror = cleanup;
+        audio.src = url;
+        audio.play().catch(() => this._speakBrowser(clean, onDone));
+      } else {
+        this._speakBrowser(clean, onDone);
+      }
+    });
+  }
+
+  _speakBrowser(text, onDone) {
     const synth = window.speechSynthesis;
-    if (!synth || !text) return;
+    if (!synth) { if (onDone) onDone(); return; }
     synth.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = 'fr-FR';
-    const voice = synth.getVoices().find((vo) => vo.lang && vo.lang.startsWith('fr'));
+    const pool = this.state.voices.length ? this.state.voices : synth.getVoices().filter((v) => v.lang && v.lang.startsWith('fr'));
+    const voice = pool.find((v) => v.voiceURI === this.state.voiceURI) || pool[0];
     if (voice) u.voice = voice;
+    if (onDone) { u.onend = onDone; u.onerror = onDone; }
     synth.speak(u);
+  }
+
+  _pushHistory(...entries) {
+    this._history.push(...entries);
+    if (this._history.length > 10) this._history = this._history.slice(-10);
+  }
+
+  // La réponse reste affichée tant que l'utilisateur ne la ferme pas lui-même, sauf si
+  // la lecture vocale est activée : dans ce cas elle se ferme automatiquement dès que
+  // la dictée est terminée (pas de minuteur arbitraire).
+  _showAnswer(reply, errorText) {
+    this.setState({ phase: 'idle', asking: 'answered', answer: reply || null, askError: errorText || null });
+    if (reply && this.state.voiceReply) this._speak(reply, () => this.closeAsk());
   }
 
   async submit(text) {
@@ -429,15 +682,46 @@ class HomeCanvas extends Component {
     if (this.state.voiceReply) this._warmupSpeech();
     const seq = ++this._askSeq;
     this.setState({ value: '', phase: 'thinking', listening: false, response: '', asking: 'thinking', askQuestion: text, answer: null, askError: null });
-    const res = await askOracle(text);
+
+    const toolSchemas = this.TOOLS.map(({ run, ...schema }) => schema);
+    const userMsg = { role: 'user', content: text.slice(0, 4000) };
+    const res = await askOracle([...this._history, userMsg], toolSchemas);
     if (seq !== this._askSeq) return;
-    this.setState({ phase: 'idle', asking: 'answered', answer: res?.reply || null, askError: res?.error || null });
-    if (this.state.voiceReply && res?.reply) this._speak(res.reply);
+
+    if (res?.error || !res?.content) { this._showAnswer(null, res?.error || 'liaison interrompue — réessaie'); return; }
+
+    if (res.toolUse) {
+      const { id, name, input } = res.toolUse;
+      const tool = this.TOOLS.find((t) => t.name === name);
+      const result = tool ? await tool.run(input) : { ok: false, error: 'Outil inconnu' };
+
+      if (name === 'ouvrir_module') {
+        // openModule() affiche déjà sa propre confirmation visuelle (fichier en ouverture) et
+        // on ne renvoie pas de tool_result ici : on ne garde donc PAS ce tour dans l'historique,
+        // sinon Claude verrait un tool_use sans tool_result et rejetterait la commande suivante.
+        this.setState({ asking: false, askQuestion: '', answer: null, askError: null });
+        return;
+      }
+
+      this._pushHistory(userMsg, { role: 'assistant', content: res.content });
+      const toolResultMsg = { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: JSON.stringify(result) }] };
+      const res2 = await askOracle([...this._history, toolResultMsg], toolSchemas);
+      if (seq !== this._askSeq) return;
+      if (res2?.error || !res2?.reply) { this._showAnswer(null, res2?.error || 'liaison interrompue — réessaie'); return; }
+      this._pushHistory(toolResultMsg, { role: 'assistant', content: res2.content });
+      this._showAnswer(res2.reply, null);
+      return;
+    }
+
+    this._pushHistory(userMsg, { role: 'assistant', content: res.content });
+    if (!res.reply) { this._showAnswer(null, 'liaison interrompue — réessaie'); return; }
+    this._showAnswer(res.reply, null);
   }
 
   closeAsk() {
     this._askSeq += 1;
-    window.speechSynthesis?.cancel();
+    clearTimeout(this._t2);
+    this._stopSpeech();
     this.setState({ asking: false, askQuestion: '', answer: null, askError: null });
   }
 
@@ -449,7 +733,7 @@ class HomeCanvas extends Component {
 
     let subLine, statusWord = 'EN LIGNE';
     if (this.state.listening) { subLine = 'À l’écoute…'; statusWord = 'ÉCOUTE'; }
-    else if (this.state.phase === 'thinking') { subLine = 'Traitement…'; statusWord = 'CALCUL'; }
+    else if (this.state.phase === 'thinking') { subLine = '▸ analyse…'; statusWord = 'CALCUL'; }
     else if (this.state.phase === 'responding') subLine = this.state.response;
     else if (this.state.booting && this.state.bootStep < 4) { subLine = 'Initialisation des systèmes…'; statusWord = 'DÉMARRAGE'; }
     else subLine = 'Tous les systèmes sont opérationnels. En attente d’instructions.';
@@ -457,15 +741,12 @@ class HomeCanvas extends Component {
     if (this.state.asking === 'answered') statusWord = 'RÉPONSE';
     if (this.state.opening) { subLine = `Ouverture du fichier — ${this.state.opening.label}…`; statusWord = 'ACCÈS'; }
 
-    const msgs = {
-      task: '3 tâches en cours. Priorité : le dossier client.',
-      agenda: 'Prochain point : standup à 09:30, puis 4 autres événements.',
-    };
+    const { taskSummary, nextSession } = this.state;
     const modules = [
       { label: 'SANTÉ', num: '01', value: 'Énergie 82 %', sub: 'sommeil 7 h 20', ref: this.santeRef, tap: () => this.openModule(this.santeRef, 'SANTÉ', '/sante') },
-      { label: 'ENTRAÎNEMENT', num: '02', value: 'Jambes · 18:00', sub: '3 / 4 cette semaine', ref: this.trainRef, tap: () => this.openModule(this.trainRef, 'ENTRAÎNEMENT', '/entrainement') },
-      { label: 'TÂCHES', num: '03', value: '3 en cours', sub: 'dossier client', tap: () => this.featureTap(msgs.task) },
-      { label: 'AGENDA', num: '04', value: 'Standup · 09:30', sub: '5 événements', tap: () => this.featureTap(msgs.agenda) },
+      { label: 'ENTRAÎNEMENT', num: '02', value: `${nextSession.groupe} · ${nextSession.jour}`, sub: '3 / 4 cette semaine', ref: this.trainRef, tap: () => this.openModule(this.trainRef, 'ENTRAÎNEMENT', '/entrainement') },
+      { label: 'TÂCHES', num: '03', value: `${taskSummary.count} en cours`, sub: taskSummary.top || 'aucune tâche', ref: this.tachesRef, tap: () => this.openModule(this.tachesRef, 'TÂCHES', '/taches') },
+      { label: 'AGENDA', num: '04', value: 'Calendrier séances', sub: 'historique & suivi', ref: this.agendaRef, tap: () => this.openModule(this.agendaRef, 'AGENDA', '/entrainement', { initialScreen: 'calendar' }) },
       { label: 'VEILLE MONDIALE', num: '05', value: 'Signaux en direct', sub: 'flux RSS + IA', ref: this.veilleRef, tap: () => this.openModule(this.veilleRef, 'VEILLE MONDIALE', '/veille') },
     ];
     const value = this.state.value;
@@ -550,6 +831,11 @@ class HomeCanvas extends Component {
                       <button type="button" onClick={this.toggleListen} title="Parler au lieu d'écrire" className={`home-vocal${this.state.listening ? ' on rec' : ''}`}>{this.state.listening ? 'ÉCOUTE…' : 'VOCAL'}</button>
                     )}
                     <button type="button" onClick={this.toggleVoiceReply} title="Lire les réponses à voix haute" className={`home-vocal${this.state.voiceReply ? ' on' : ''}`}>VOIX {this.state.voiceReply ? 'ON' : 'OFF'}</button>
+                    {this.state.voiceReply && this.state.voices.length > 1 && (
+                      <select className="home-voice-select" value={this.state.voiceURI} onChange={this.onVoiceChange} title="Choisir la voix">
+                        {this.state.voices.map((v) => <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>)}
+                      </select>
+                    )}
                     <button type="submit" title="Envoyer" className="home-send">⏵</button>
                   </form>
                 </div>
@@ -593,6 +879,11 @@ class HomeCanvas extends Component {
                     <button type="button" onClick={this.toggleListen} title="Parler au lieu d'écrire" className={`home-vocal${this.state.listening ? ' on rec' : ''}`}>{this.state.listening ? '●' : 'VOCAL'}</button>
                   )}
                   <button type="button" onClick={this.toggleVoiceReply} title="Lire les réponses à voix haute" className={`home-vocal${this.state.voiceReply ? ' on' : ''}`}>♪</button>
+                  {this.state.voiceReply && this.state.voices.length > 1 && (
+                    <select className="home-voice-select" value={this.state.voiceURI} onChange={this.onVoiceChange} title="Choisir la voix">
+                      {this.state.voices.map((v) => <option key={v.voiceURI} value={v.voiceURI}>{v.name}</option>)}
+                    </select>
+                  )}
                   <button type="submit" title="Envoyer" className="home-send">⏵</button>
                 </form>
               </div>

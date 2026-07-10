@@ -80,7 +80,9 @@
       "Bash(git add *)",
       "Bash(rm /Users/dylan/Oracle/.git/index.lock && git add .claude/ .gitignore .mcp.json README.md index.html package-lock.json package.json public/ src/ supabase/ vite.config.js && git status)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(grep -n \"const { tasks, nextSession }\\\\|TÂCHES\\\\|msgs.task\\\\|msgs = {\" /Users/dylan/Oracle/src/pages/Home.jsx)",
+      "Bash(grep -n \"_rec = null;\\\\s*$\\\\|_history = \\\\[\\\\];\\\\|componentWillUnmount\" /Users/dylan/Oracle/src/pages/Home.jsx)"
     ],
     "additionalDirectories": [
       "/Users/dylan/Oracle/supabase/functions",

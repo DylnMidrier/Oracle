@@ -92,3 +92,27 @@ alter table health_records disable row level security;
 -- Barre de commande de la Home : supabase/functions/ask-oracle relaie la question
 -- à Claude Sonnet. Réutilise le même secret ANTHROPIC_API_KEY que world-watch-refresh
 -- (les secrets Supabase sont partagés au niveau du projet, pas besoin de le redéfinir).
+
+-- Tâches : module Tâches (vue 1B "objectif prioritaire" sur desktop, groupé par
+-- priorité + tiroir sur mobile). Alimenté manuellement (quick-add dans l'appli) ou
+-- via le tool vocal ajouter_tache (voir src/pages/Home.jsx).
+create table if not exists tasks (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  category text,
+  priority text not null default 'p3' check (priority in ('p1', 'p2', 'p3')),
+  status text not null default 'attente' check (status in ('attente', 'cours', 'clos')),
+  due_at timestamptz,
+  note text,
+  subs jsonb not null default '[]', -- [{ label, done }]
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists tasks_status_idx on tasks (status);
+alter table tasks disable row level security;
+
+-- Lecture vocale des réponses d'Oracle : supabase/functions/tts appelle OpenAI TTS
+-- (voix bien plus naturelle que les voix système du navigateur, utilisées en repli
+-- si ce secret est absent ou que l'appel échoue). Nécessite un secret OPENAI_API_KEY
+-- (Dashboard Supabase > Edge Functions > tts > Secrets, ou `supabase secrets set`).

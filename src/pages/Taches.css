@@ -1,0 +1,109 @@
+.tk-page { position: relative; min-height: 100vh; height: 100vh; display: flex; flex-direction: column; background: radial-gradient(ellipse 80% 70% at 32% 40%, #071426 0%, #020509 66%); color: #d7e8f7; animation: unfold .6s cubic-bezier(.5, 0, .2, 1) both; overflow: hidden; }
+
+.tk-topbar { position: relative; z-index: 10; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 18px 28px; border-bottom: 1px solid var(--line); background: rgba(4, 12, 24, .8); backdrop-filter: blur(12px); flex: 0 0 auto; }
+.tk-brand { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.tk-brand .name { font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 15px; letter-spacing: .14em; color: var(--ink-bright); white-space: nowrap; }
+.tk-icon-btn { cursor: pointer; width: 38px; height: 38px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 6px; color: var(--ink-dim); font-size: 15px; background: transparent; }
+.tk-pills { display: flex; align-items: center; gap: 10px; }
+.tk-pill { font-size: 11px; letter-spacing: .08em; padding: 6px 10px; border: 1px solid; border-radius: 5px; background: rgba(2, 9, 18, .4); }
+
+.tk-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; padding: 20px; }
+.tk-empty .eyebrow { font-size: 10px; letter-spacing: .3em; color: var(--ink-dimmer); }
+.tk-empty .msg { font-size: 12px; color: var(--ink-dim); max-width: 360px; line-height: 1.7; }
+
+.tk-quickadd-toggle { cursor: pointer; width: 100%; padding: 11px 14px; background: rgba(10, 25, 45, .42); border: 1px dashed rgba(120, 190, 255, .25); border-radius: 6px; color: #7fa3c2; font-size: 10.5px; letter-spacing: .14em; font-family: 'JetBrains Mono', monospace; transition: background .18s, border-color .18s, color .18s; }
+.tk-quickadd-toggle:hover { background: rgba(90, 170, 255, .08); border-color: rgba(120, 190, 255, .45); color: #eaf5ff; }
+
+.tk-taskform { display: flex; flex-direction: column; gap: 8px; padding: 14px; background: rgba(10, 25, 45, .5); border: 1px solid rgba(120, 190, 255, .22); border-radius: 6px; animation: cardIn .3s ease both; }
+.tk-taskform input, .tk-taskform select, .tk-taskform textarea { background: rgba(2, 9, 18, .6); border: 1px solid rgba(120, 190, 255, .2); border-radius: 4px; color: #eaf5ff; font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 9px 10px; outline: none; width: 100%; }
+.tk-taskform input::placeholder, .tk-taskform textarea::placeholder { color: #3d5a75; }
+.tk-taskform textarea { resize: vertical; }
+.tk-taskform-row { display: flex; gap: 8px; }
+.tk-taskform-row select { flex: 0 0 auto; width: auto; }
+.tk-taskform-row input { flex: 1; min-width: 0; }
+.tk-taskform-error { font-size: 10.5px; color: #ff8a8a; font-family: 'JetBrains Mono', monospace; }
+.tk-taskform-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }
+.tk-taskform-actions .tk-btn { padding: 8px 16px; font-size: 9.5px; }
+
+.tk-badge { font-size: 9px; letter-spacing: .2em; padding: 4px 9px; border-radius: 3px; border: 1px solid; }
+.tk-cat { font-size: 9px; letter-spacing: .2em; color: var(--ink-dimmer); }
+
+.tk-note-box { margin-top: 16px; padding: 13px 14px; background: rgba(2, 9, 18, .5); border: 1px solid var(--line); border-radius: 6px; }
+.tk-note-box .lbl { font-size: 8.5px; letter-spacing: .24em; color: var(--accent); }
+.tk-note-box .txt { font-size: 11.5px; color: #c3dbef; line-height: 1.65; margin-top: 7px; }
+
+.tk-subs-lbl { font-size: 9px; letter-spacing: .26em; color: #3d5a75; margin-bottom: 9px; }
+.tk-subrow { display: flex; align-items: center; gap: 9px; cursor: pointer; border-radius: 5px; background: rgba(2, 9, 18, .35); border: 1px solid rgba(120, 190, 255, .08); margin-bottom: 6px; }
+.tk-subrow .box { flex: 0 0 auto; border: 1px solid; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-size: 10px; color: #020509; }
+
+.tk-btn { cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 9px; padding: 10px 20px; border-radius: 5px; font-size: 10px; letter-spacing: .22em; background: transparent; border: 1px solid rgba(120, 190, 255, .25); color: #7fa3c2; transition: background .18s, border-color .18s; }
+.tk-btn:hover { background: rgba(90, 170, 255, .1); }
+.tk-btn.good { border-color: rgba(102, 230, 160, .4); color: #66e6a0; }
+.tk-btn.good:hover { background: rgba(74, 222, 128, .12); }
+
+/* ---- Desktop : 1B objectif prioritaire ---- */
+.tk-desktop { flex: 1; min-height: 0; display: flex; gap: 36px; padding: 30px 40px 28px; }
+.tk-cur-col { flex: 1.15; min-width: 0; display: flex; flex-direction: column; }
+.tk-cur-card { margin-top: 6px; padding: 26px 28px; background: rgba(6, 16, 30, .72); border: 1px solid; border-radius: 10px; backdrop-filter: blur(14px); animation: cardIn .45s ease both; overflow-y: auto; }
+.tk-cur-top { display: flex; align-items: flex-start; gap: 26px; }
+.tk-ring { position: relative; width: 128px; height: 128px; flex: 0 0 auto; }
+.tk-ring-txt { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.tk-ring-txt .n { font-family: 'Chakra Petch', sans-serif; font-size: 26px; font-weight: 600; color: #eaf5ff; }
+.tk-ring-txt .n span { font-size: 14px; color: #5a7893; }
+.tk-ring-txt .l { font-size: 8px; letter-spacing: .2em; color: #5a7893; margin-top: 2px; }
+.tk-cur-head { flex: 1; min-width: 0; }
+.tk-cur-title { font-family: 'Chakra Petch', sans-serif; font-weight: 600; font-size: 24px; color: #eaf5ff; margin-top: 11px; line-height: 1.25; }
+.tk-cur-due { display: flex; align-items: center; gap: 10px; margin-top: 8px; font-size: 11px; color: #7fa3c2; }
+.tk-cur-due .dim { color: #3d5a75; }
+.tk-subs-col { margin-top: 18px; }
+.tk-cur-actions { display: flex; gap: 12px; margin-top: 20px; }
+.tk-cur-foot { margin-top: auto; display: flex; align-items: center; gap: 14px; font-size: 10px; letter-spacing: .12em; color: #3d5a75; padding-top: 18px; }
+.tk-cur-foot .sep { color: #22364a; }
+
+.tk-queue-col { flex: 0 0 330px; display: flex; flex-direction: column; min-height: 0; padding-top: 6px; gap: 12px; }
+.tk-queue-lbl { font-size: 10px; letter-spacing: .28em; color: #3d5a75; padding: 0 2px; }
+.tk-queue-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 9px; padding-right: 4px; }
+.tk-queue-empty { font-size: 10.5px; color: #3d5a75; padding: 6px 2px; }
+.tk-queue-item { cursor: pointer; display: flex; gap: 13px; align-items: flex-start; padding: 12px 14px; background: rgba(10, 25, 45, .42); border: 1px solid rgba(120, 190, 255, .13); border-radius: 6px; transition: background .18s, transform .18s; }
+.tk-queue-item:hover { background: rgba(90, 170, 255, .08); transform: translateX(2px); }
+.tk-queue-item .idx { font-size: 17px; font-weight: 300; color: #3d5a75; flex: 0 0 auto; padding-top: 1px; }
+.tk-queue-item .row { display: flex; align-items: center; gap: 8px; }
+.tk-queue-item .dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; }
+.tk-queue-item .prilabel { font-size: 8.5px; letter-spacing: .16em; }
+.tk-queue-item .tminus { font-size: 8.5px; color: #3d5a75; margin-left: auto; }
+.tk-queue-item .title { font-family: 'Chakra Petch', sans-serif; font-size: 13.5px; font-weight: 500; color: #eaf5ff; margin-top: 5px; line-height: 1.3; }
+.tk-queue-item .meta { font-size: 9.5px; color: #7fa3c2; margin-top: 3px; }
+.tk-queue-item.done { align-items: center; opacity: .55; cursor: default; }
+.tk-queue-item.done:hover { transform: none; background: rgba(10, 25, 45, .42); }
+.tk-queue-item .check { color: #66e6a0; font-size: 12px; }
+
+.tk-mobile { display: none; }
+
+@media (max-width: 900px) {
+  .tk-desktop { display: none; }
+  .tk-mobile { display: block; flex: 1; min-height: 0; overflow-y: auto; padding: 16px 0 30px; }
+  .tk-mobile-list { display: flex; flex-direction: column; gap: 8px; padding: 4px 16px 20px; }
+  .tk-group-head { display: flex; align-items: center; gap: 9px; margin-top: 10px; font-size: 9px; letter-spacing: .26em; }
+  .tk-group-head .line { flex: 1; height: 1px; background: rgba(120, 190, 255, .12); }
+  .tk-group-head .n { font-size: 9px; color: #3d5a75; }
+  .tk-mcard { cursor: pointer; padding: 13px 15px; background: rgba(10, 25, 45, .45); border: 1px solid rgba(120, 190, 255, .13); border-radius: 10px; }
+  .tk-mcard .row { display: flex; align-items: center; gap: 8px; }
+  .tk-mcard .cat { font-size: 8.5px; letter-spacing: .14em; color: #3d5a75; }
+  .tk-mcard .due { font-size: 8.5px; margin-left: auto; }
+  .tk-mcard .title { font-family: 'Chakra Petch', sans-serif; font-size: 14.5px; font-weight: 500; color: #eaf5ff; margin-top: 6px; line-height: 1.3; }
+  .tk-mcard .prog { display: flex; align-items: center; gap: 10px; margin-top: 9px; }
+  .tk-mcard .prog .track { flex: 1; height: 3px; background: rgba(120, 190, 255, .12); border-radius: 2px; overflow: hidden; }
+  .tk-mcard .prog .track > div { height: 100%; transition: width .4s; }
+  .tk-mcard .prog span { font-size: 9px; color: #5a7893; }
+  .tk-mcard.done { display: flex; align-items: center; gap: 11px; opacity: .55; cursor: default; }
+  .tk-mcard.done .check { color: #66e6a0; font-size: 12px; }
+
+  .tk-sheet-backdrop { position: fixed; inset: 0; z-index: 58; background: rgba(2, 5, 9, .55); animation: fadein .25s ease both; }
+  .tk-sheet { position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 59; animation: sheetup .4s cubic-bezier(.3, 0, .2, 1) both; }
+  .tk-sheet-bar { height: 2px; border-radius: 20px 20px 0 0; }
+  .tk-sheet-body { background: rgba(6, 16, 30, .97); border: 1px solid rgba(120, 190, 255, .3); border-radius: 0 0 20px 20px; padding: 16px 18px 22px; max-height: 80vh; overflow-y: auto; }
+  .tk-sheet-grip { width: 40px; height: 4px; background: rgba(120, 190, 255, .25); border-radius: 2px; margin: 0 auto 14px; }
+  .tk-sheet-close { cursor: pointer; margin-left: auto; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(120, 190, 255, .22); border-radius: 6px; color: #7fa3c2; font-size: 12px; }
+}
+
+@keyframes sheetup { from { transform: translateY(105%); } to { transform: translateY(0); } }
