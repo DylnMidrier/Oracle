@@ -73,6 +73,11 @@
 .tr-weight-ctl .kg { font-size: 11px; color: var(--ink-dimmer); }
 .tr-check { cursor: pointer; width: 44px; height: 36px; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(120, 190, 255, .35); border-radius: 5px; color: var(--accent); font-size: 16px; background: transparent; transition: background .18s, border-color .18s; }
 .tr-check.done { background: var(--accent); border-color: var(--accent); color: #020509; }
+.tr-set-remove { cursor: pointer; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border: 1px solid rgba(255, 107, 107, .3); border-radius: 5px; color: #ff6b6b; font-size: 12px; background: transparent; transition: background .18s, opacity .18s; }
+.tr-set-remove:hover { background: rgba(255, 107, 107, .12); }
+.tr-set-remove:disabled { opacity: .3; cursor: default; }
+.tr-set-add { cursor: pointer; width: 100%; margin-top: 4px; padding: 11px; background: rgba(10, 25, 45, .3); border: 1px dashed rgba(120, 190, 255, .25); border-radius: 6px; color: #7fa3c2; font-size: 11px; letter-spacing: .12em; font-family: 'JetBrains Mono', monospace; transition: background .18s, border-color .18s, color .18s; }
+.tr-set-add:hover { background: rgba(90, 170, 255, .08); border-color: rgba(120, 190, 255, .45); color: #eaf5ff; }
 
 .tr-rpe-row { display: flex; align-items: center; gap: 10px; margin-top: 20px; flex-wrap: wrap; }
 .tr-rpe-row .lbl { font-size: 11px; letter-spacing: .2em; color: var(--ink-dimmer); }

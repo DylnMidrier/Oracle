@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { peekReturnFlag, clearReturnFlag } from '../lib/coreTransition.js';
 import { askOracle } from '../lib/oracleChat.js';
 import { supabase, supabaseReady } from '../lib/supabase.js';
-import { SESSIONS } from '../data/sessions.js';
 import { fetchTaskSummary, createTask } from '../lib/tasks.js';
 import { synthesizeSpeech } from '../lib/tts.js';
 import './Home.css';
@@ -80,60 +79,68 @@ class HomeCanvas extends Component {
     },
     {
       name: 'ajouter_seance',
-      description: "Planifie une séance d'entraînement (groupe musculaire + jour/heure), avec le détail des exercices " +
-        "s'ils sont précisés (nom, poids, séries, répétitions). Met à jour le HUD et crée une vraie séance utilisable " +
-        'dans le module Entraînement.',
+      description: "Enregistre une séance d'entraînement RÉELLEMENT effectuée (détail série par série : poids et " +
+        "répétitions de chaque série, y compris les échauffements). Elle apparaît ensuite dans le calendrier du " +
+        "module Entraînement, consultable en détail. Ne sert pas à planifier une séance future sans données réelles.",
       input_schema: {
         type: 'object',
         properties: {
-          groupe: { type: 'string', description: 'Groupe musculaire ou nom de la séance, ex: jambes, upper, dos' },
-          jour: { type: 'string', description: 'Jour et/ou heure prévue, ex: jeudi 18:00' },
+          nom: { type: 'string', description: 'Nom de la séance, ex: upper, lower, jambes, push — regroupe avec les séances du même nom au calendrier' },
+          date_iso: { type: 'string', description: "Date à laquelle la séance a été faite, au format AAAA-MM-JJ (déduis-la si donnée en langage naturel, ex: « 10 juillet » ; par défaut aujourd'hui si non précisée)" },
           exercices: {
             type: 'array',
-            description: 'Exercices mentionnés pour cette séance, si précisés',
+            description: 'Exercices réellement effectués, dans l’ordre',
             items: {
               type: 'object',
               properties: {
-                nom: { type: 'string', description: "Nom de l'exercice, ex: développé couché barre" },
-                poids: { type: 'number', description: 'Charge en kg' },
-                series: { type: 'integer', description: 'Nombre de séries' },
-                repetitions: { type: 'integer', description: 'Répétitions par série' },
+                nom: { type: 'string', description: "Nom de l'exercice" },
+                series: {
+                  type: 'array',
+                  description: 'Chaque série effectuée dans l’ordre (échauffements inclus)',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      poids: { type: 'number', description: 'Charge en kg (0 si poids du corps)' },
+                      repetitions: { type: 'integer' },
+                    },
+                    required: ['repetitions'],
+                  },
+                },
               },
-              required: ['nom'],
+              required: ['nom', 'series'],
             },
           },
         },
-        required: ['groupe', 'jour'],
+        required: ['nom', 'exercices'],
       },
       run: async (input) => {
-        const groupe = String(input?.groupe || '').trim() || 'Séance';
-        const jour = String(input?.jour || '').trim() || 'à définir';
+        const nom = String(input?.nom || '').trim() || 'Séance';
+        const dateISO = /^\d{4}-\d{2}-\d{2}$/.test(input?.date_iso || '') ? input.date_iso : new Date().toISOString().slice(0, 10);
         const exercises = (Array.isArray(input?.exercices) ? input.exercices : []).map((e) => {
-          const series = Number(e.series) > 0 ? Math.round(Number(e.series)) : 3;
-          const reps = Number(e.repetitions) > 0 ? Math.round(Number(e.repetitions)) : 10;
-          const poids = Number(e.poids) || 0;
-          return { name: String(e.nom || 'Exercice').trim(), note: '', target: `${series} × ${reps}`, prev: poids, pr: poids, rest: 90, reps: Array(series).fill(reps) };
+          const sets = (Array.isArray(e.series) ? e.series : []).map((s) => ({
+            weight: Number(s.poids) || 0,
+            reps: Math.round(Number(s.repetitions)) || 0,
+            checked: true,
+          }));
+          return { name: String(e.nom || 'Exercice').trim(), note: '', target: `${sets.length} séries`, rpe: null, sets };
         });
 
-        this.setState({ nextSession: { groupe, jour } });
-        if (!supabaseReady) return { ok: true, groupe, jour, exercices: exercises.map((e) => e.name), saved: false };
-
+        if (!supabaseReady) return { ok: false, error: 'Supabase non configuré' };
         try {
-          // dès qu'une ligne existe dans session_templates, le module Entraînement n'affiche
-          // plus QUE les lignes en base : on doit d'abord y semer upper/lower par défaut.
-          const { data: existing } = await supabase.from('session_templates').select('key');
-          if (!existing || existing.length === 0) {
-            await supabase.from('session_templates').insert(
-              Object.entries(SESSIONS).map(([k, v]) => ({ key: k, meta: v.meta, exercises: v.exercises })),
-            );
-          }
-          const key = `${slugify(groupe)}_${Date.now().toString(36)}`;
-          const meta = { name: groupe.toUpperCase(), tag: 'SÉANCE // AJOUTÉE PAR ORACLE', sub: jour, glyph: groupe.trim().charAt(0).toUpperCase() || 'S', dur: '~45 min' };
-          const { error } = await supabase.from('session_templates').insert({ key, meta, exercises });
-          if (error) return { ok: false, groupe, jour, exercices: exercises.map((e) => e.name), saved: false, error: error.message };
-          return { ok: true, groupe, jour, exercices: exercises.map((e) => e.name), saved: true };
+          // Regroupe sous la clé d'un template existant si le nom correspond (ex: "upper"),
+          // pour un affichage cohérent au calendrier ; sinon une clé stable dérivée du nom.
+          const { data: existing } = await supabase.from('session_templates').select('key, meta');
+          const slug = slugify(nom);
+          const match = (existing || []).find((t) => t.key === slug || slugify(t.meta?.name || '') === slug);
+          const sessionKey = match ? match.key : slug;
+
+          const { error } = await supabase.from('workout_logs').insert({
+            session_key: sessionKey, performed_on: dateISO, overall_rpe: null, data: { exercises },
+          });
+          if (error) return { ok: false, nom, date: dateISO, error: error.message };
+          return { ok: true, nom, date: dateISO, exercices: exercises.map((e) => e.name), saved: true };
         } catch (err) {
-          return { ok: false, groupe, jour, exercices: exercises.map((e) => e.name), saved: false, error: String(err?.message || err) };
+          return { ok: false, nom, date: dateISO, error: String(err?.message || err) };
         }
       },
     },

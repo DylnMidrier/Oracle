@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { SESSIONS } from '../data/sessions.js';
 import { supabase, supabaseReady } from '../lib/supabase.js';
@@ -34,6 +34,8 @@ export default function Training() {
   const [checks, setChecks] = useState({});
   const [weights, setWeights] = useState({});
   const [repsOverride, setRepsOverride] = useState({});
+  const [setIds, setSetIds] = useState({}); // { [ei]: [id, ...] } — ordre + identité stable des séries d'un exo (ajout/suppression en cours de séance)
+  const nextSetId = useRef(100000);
   const [rpe, setRpe] = useState({});
   const [active, setActive] = useState(0);
   const [timer, setTimer] = useState(0);
@@ -83,11 +85,34 @@ export default function Training() {
   function selectSession(key) {
     const s = templates[key];
     const ctx = buildExerciseContext(history, key, s.exercises);
-    const w = {}; const r = {};
-    s.exercises.forEach((ex, ei) => ex.reps.forEach((baseReps, si) => { w[`${ei}_${si}`] = String(ctx[ei].defaultWeight); r[`${ei}_${si}`] = String(baseReps); }));
-    setSessionKey(key); setWeights(w); setRepsOverride(r); setChecks({}); setRpe({}); setActive(0); setTimer(0); setTimerTotal(0); setSwaps({});
+    const w = {}; const r = {}; const ids = {};
+    s.exercises.forEach((ex, ei) => {
+      ids[ei] = ex.reps.map((_, si) => si);
+      ex.reps.forEach((baseReps, si) => { w[`${ei}_${si}`] = String(ctx[ei].defaultWeight); r[`${ei}_${si}`] = String(baseReps); });
+    });
+    setSessionKey(key); setWeights(w); setRepsOverride(r); setSetIds(ids); setChecks({}); setRpe({}); setActive(0); setTimer(0); setTimerTotal(0); setSwaps({});
     setSessionDate(todayISO());
     setScreen('module');
+  }
+
+  function addSet(ei) {
+    const id = nextSetId.current++;
+    const list = setIds[ei] || [];
+    const lastKey = list.length ? `${ei}_${list[list.length - 1]}` : null;
+    const w = (lastKey && weights[lastKey] != null) ? weights[lastKey] : String(exCtx[ei]?.defaultWeight ?? 0);
+    const r = (lastKey && repsOverride[lastKey] != null) ? repsOverride[lastKey] : '10';
+    const k = `${ei}_${id}`;
+    setSetIds((m) => ({ ...m, [ei]: [...(m[ei] || []), id] }));
+    setWeights((ws) => ({ ...ws, [k]: w }));
+    setRepsOverride((rs) => ({ ...rs, [k]: r }));
+  }
+
+  function removeSet(ei, id) {
+    setSetIds((m) => {
+      const list = m[ei] || [];
+      if (list.length <= 1) return m; // garder au moins une série
+      return { ...m, [ei]: list.filter((x) => x !== id) };
+    });
   }
 
   function backToSelect() { setScreen('select'); setSessionKey(null); setTimer(0); setSwaps({}); }
@@ -136,7 +161,7 @@ export default function Training() {
   function toggleRpe(ei, n) { setRpe((r) => ({ ...r, [ei]: r[ei] === n ? null : n })); }
 
   let doneSets = 0, totalSets = 0;
-  if (sess) exercises.forEach((ex, ei) => ex.reps.forEach((_, si) => { totalSets++; if (checks[`${ei}_${si}`]) doneSets++; }));
+  if (sess) exercises.forEach((_ex, ei) => (setIds[ei] || []).forEach((id) => { totalSets++; if (checks[`${ei}_${id}`]) doneSets++; }));
   const pct = totalSets ? Math.round((doneSets / totalSets) * 100) : 0;
 
   async function finishSession() {
@@ -146,9 +171,9 @@ export default function Training() {
     const data = {
       exercises: exercises.map((ex, ei) => ({
         name: ex.name, note: ex.note, target: ex.target, rpe: rpe[ei] || null,
-        sets: ex.reps.map((baseReps, si) => {
-          const k = `${ei}_${si}`;
-          return { reps: parseInt(repsOverride[k], 10) || baseReps, weight: Number(weights[k]) || 0, checked: !!checks[k] };
+        sets: (setIds[ei] || []).map((id) => {
+          const k = `${ei}_${id}`;
+          return { reps: parseInt(repsOverride[k], 10) || ex.reps[id] || 0, weight: Number(weights[k]) || 0, checked: !!checks[k] };
         }),
       })),
     };
@@ -240,9 +265,10 @@ export default function Training() {
           </div>
 
           <div className="tr-strip">
-            {exercises.map((ex, ei) => {
-              const setCount = ex.reps.length;
-              const d = ex.reps.filter((_, si) => checks[`${ei}_${si}`]).length;
+            {exercises.map((_ex, ei) => {
+              const ids = setIds[ei] || [];
+              const setCount = ids.length;
+              const d = ids.filter((id) => checks[`${ei}_${id}`]).length;
               const complete = d === setCount;
               return (
                 <div key={ei} className="tr-strip-item" onClick={() => setActive(ei)} style={{ background: active === ei ? 'rgba(77,184,255,.12)' : 'transparent', borderColor: active === ei ? 'rgba(120,190,255,.5)' : 'var(--line)' }}>
@@ -256,8 +282,9 @@ export default function Training() {
           <div className="tr-body">
             <div className="tr-rail">
               {exercises.map((ex, ei) => {
-                const setCount = ex.reps.length;
-                const d = ex.reps.filter((_, si) => checks[`${ei}_${si}`]).length;
+                const ids = setIds[ei] || [];
+                const setCount = ids.length;
+                const d = ids.filter((id) => checks[`${ei}_${id}`]).length;
                 const complete = d === setCount;
                 const delta = exCtx[ei].delta;
                 const dCol = delta > 0 ? '#4ade80' : delta < 0 ? '#ff6b6b' : '#7fa3c2';
@@ -276,10 +303,11 @@ export default function Training() {
             </div>
 
             <ExerciseDetail
-              ei={active} ex={exercises[active]} ctx={exCtx[active]}
+              ei={active} ex={exercises[active]} ctx={exCtx[active]} setIds={setIds[active] || []}
               checks={checks} weights={weights} repsOverride={repsOverride} rpeSel={rpe[active]}
               onToggleSet={toggleSet} onSetWeight={setWeight} onStepWeight={stepWeight}
               onSetReps={setRepCount} onStepReps={stepRepCount} onSetRpe={(n) => toggleRpe(active, n)}
+              onAddSet={addSet} onRemoveSet={removeSet}
               hasPrev={active > 0} hasNext={active < exercises.length - 1}
               onPrev={() => setActive((a) => Math.max(0, a - 1))} onNext={() => setActive((a) => Math.min(exercises.length - 1, a + 1))}
               onReplace={() => openPicker(active)}
@@ -411,7 +439,7 @@ export default function Training() {
   );
 }
 
-function ExerciseDetail({ ei, ex, ctx, checks, weights, repsOverride, rpeSel, onToggleSet, onSetWeight, onStepWeight, onSetReps, onStepReps, onSetRpe, hasPrev, hasNext, onPrev, onNext, onReplace }) {
+function ExerciseDetail({ ei, ex, ctx, setIds, checks, weights, repsOverride, rpeSel, onToggleSet, onSetWeight, onStepWeight, onSetReps, onStepReps, onSetRpe, onAddSet, onRemoveSet, hasPrev, hasNext, onPrev, onNext, onReplace }) {
   const delta = ctx.delta;
   const dCol = delta > 0 ? '#4ade80' : delta < 0 ? '#ff6b6b' : '#7fa3c2';
   const dArrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '=';
@@ -449,14 +477,15 @@ function ExerciseDetail({ ei, ex, ctx, checks, weights, repsOverride, rpeSel, on
       </div>
 
       <div className="tr-sets">
-        {ex.reps.map((baseReps, si) => {
-          const key = `${ei}_${si}`;
+        {setIds.map((id, idx) => {
+          const key = `${ei}_${id}`;
           const checked = !!checks[key];
           const weight = weights[key] != null ? weights[key] : String(ctx.defaultWeight);
+          const baseReps = ex.reps[id] ?? 10;
           const repsVal = repsOverride[key] != null ? repsOverride[key] : String(baseReps);
           return (
-            <div key={si} className={`tr-setrow${checked ? ' done' : ''}`}>
-              <span className="lbl">SÉRIE {si + 1}</span>
+            <div key={id} className={`tr-setrow${checked ? ' done' : ''}`}>
+              <span className="lbl">SÉRIE {idx + 1}</span>
               <div className="tr-reps-ctl">
                 <button onClick={() => onStepReps(key, baseReps, -1)}>−</button>
                 <input value={repsVal} onChange={(e) => onSetReps(key, e.target.value)} />
@@ -469,10 +498,12 @@ function ExerciseDetail({ ei, ex, ctx, checks, weights, repsOverride, rpeSel, on
                 <button onClick={() => onStepWeight(key, 2.5)}>+</button>
                 <span className="kg">kg</span>
               </div>
-              <button className={`tr-check${checked ? ' done' : ''}`} onClick={() => onToggleSet(ei, si, ex.rest)}>{checked ? '✓' : ''}</button>
+              <button className={`tr-check${checked ? ' done' : ''}`} onClick={() => onToggleSet(ei, id, ex.rest)}>{checked ? '✓' : ''}</button>
+              <button className="tr-set-remove" title="Supprimer cette série" disabled={setIds.length <= 1} onClick={() => onRemoveSet(ei, id)}>✕</button>
             </div>
           );
         })}
+        <button className="tr-set-add" onClick={() => onAddSet(ei)}>+ AJOUTER UNE SÉRIE</button>
       </div>
 
       <div className="tr-rpe-row">
