@@ -147,9 +147,9 @@ class HomeCanvas extends Component {
     },
     {
       name: 'analyser_seance',
-      description: "Débriefe une séance d'entraînement RÉELLEMENT enregistrée : renvoie perf série par série, e1RM " +
-        "estimé, records battus, évolution de chaque exercice vs la fois précédente, comparaison de volume avec la " +
-        "séance de même type et fréquence sur 30 jours. Par défaut la DERNIÈRE séance en date ; on peut cibler par " +
+      description: "Débriefe une séance d'entraînement RÉELLEMENT enregistrée : renvoie perf série par série (charges " +
+        "et répétitions réelles), volume, records de charge battus, évolution de chaque exercice vs la fois précédente, " +
+        "comparaison de volume avec la séance de même type et fréquence sur 30 jours. Par défaut la DERNIÈRE séance en date ; on peut cibler par " +
         "nom/type (upper, lower, jambes…) ou par date. Utilise-le dès que Dylan demande d'analyser, débriefer, " +
         "commenter ou noter sa séance, ses perfs ou sa progression.",
       input_schema: {

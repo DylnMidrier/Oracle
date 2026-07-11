@@ -174,23 +174,26 @@ export function sessionAnalysis(history, { name, dateISO, nameFor } = {}) {
     const cur = pos >= 0 ? entries[pos] : null;
     const prev = pos > 0 ? entries[pos - 1] : null;
     const prior = entries.filter((e) => e.date < target.performed_on);
-    const priorBest = prior.reduce((a, e) => Math.max(a, e.bestE1RM), 0);
-    const e1rm = cur ? cur.bestE1RM : 0;
+    // Progression et records fondés sur des FAITS RÉELS (charge soulevée, volume) —
+    // jamais sur l'e1RM, qui reste une estimation (formule d'Epley) et non une charge réelle.
+    const priorTop = prior.reduce((a, e) => Math.max(a, e.topWeight), 0);
+    const chargeMax = cur ? cur.topWeight : 0;
     return {
       nom: ex.name,
       series: (cur ? cur.sets : []).map((s) => ({ poids: s.weight, reps: s.reps })),
       volume: cur ? cur.volume : 0,
-      charge_max: cur ? cur.topWeight : 0,
-      e1rm,
-      evolution_e1rm: prev ? Math.round(e1rm - prev.bestE1RM) : null, // vs la dernière fois que l'exo a été fait
+      charge_max: chargeMax,
+      charge_max_precedente: prev ? prev.topWeight : null,
+      evolution_charge_kg: prev ? Math.round((chargeMax - prev.topWeight) * 10) / 10 : null, // vs la dernière fois
+      evolution_volume: prev ? Math.round(cur.volume - prev.volume) : null,
       derniere_fois: prev ? prev.date : null,
-      record: e1rm > 0 && prior.length > 0 && e1rm > priorBest,
+      record_charge: chargeMax > 0 && prior.length > 0 && chargeMax > priorTop, // charge jamais atteinte avant
     };
   });
 
   const volumeTotal = Math.round(exercices.reduce((a, e) => a + e.volume, 0));
   const nbSeries = exercices.reduce((a, e) => a + e.series.length, 0);
-  const records = exercices.filter((e) => e.record).map((e) => e.nom);
+  const records = exercices.filter((e) => e.record_charge).map((e) => e.nom);
 
   const prevSame = logs.find((l) => l.session_key === target.session_key && l.performed_on < target.performed_on);
   const prevAny = logs.find((l) => l.performed_on < target.performed_on);
