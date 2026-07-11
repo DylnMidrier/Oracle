@@ -5,6 +5,8 @@ import { supabase, supabaseReady } from '../lib/supabase.js';
 import { fmtTime, sparkPoints } from '../lib/trainingStats.js';
 import { buildExerciseContextByName, exerciseIndex, recapStats, overview } from '../lib/analysis.js';
 import { CATEGORIES, fetchExercisesByCategory } from '../lib/wger.js';
+import { assessStrength, LEVELS, LEVEL_COLORS } from '../lib/strengthStandards.js';
+import { useProfile } from '../lib/profile.js';
 import { useCoreClose } from '../lib/coreTransition.js';
 import './Training.css';
 
@@ -59,6 +61,7 @@ export default function Training() {
   const [calM, setCalM] = useState(() => new Date().getMonth());
   const [recapLog, setRecapLog] = useState(null);
   const [anOpen, setAnOpen] = useState(null); // exercice déplié dans l'écran d'analyse
+  const [profile, updateProfile] = useProfile(); // sexe / poids de corps / âge — pour les barèmes de force
 
   useEffect(() => {
     if (!supabaseReady) return;
@@ -509,6 +512,8 @@ export default function Training() {
                 <div className="tr-meta-card"><div className="lbl">DERNIÈRE SÉANCE</div><div className="val hdg">{ov.daysSince == null ? '—' : ov.daysSince === 0 ? "AUJOURD'HUI" : `IL Y A ${ov.daysSince} J`}</div></div>
               </div>
 
+              <StrengthStanding exercises={anExercises} profile={profile} onProfile={updateProfile} />
+
               <div className="tr-an-panel">
                 <div className="lbl">VOLUME HEBDOMADAIRE · 8 SEMAINES</div>
                 <div className="tr-an-bars">
@@ -785,6 +790,123 @@ function RecapView({ log, templates, history, onBack }) {
         </div>
       ))}
       <button className="tr-navbtn" style={{ marginTop: 20 }} onClick={onBack}>‹ RETOUR AU CALENDRIER</button>
+    </div>
+  );
+}
+
+// Positionne les charges (meilleur e1RM par exercice) sur la population des pratiquants.
+// Ancres de centile par niveau, pour nommer le niveau global à partir d'un centile moyen.
+function levelFromPct(pct) {
+  if (pct >= 95) return 4;
+  if (pct >= 80) return 3;
+  if (pct >= 50) return 2;
+  if (pct >= 20) return 1;
+  return 0;
+}
+
+// Barre de centile 0→100 avec repères de niveau (5/20/50/80/95) et un marqueur.
+function PctBar({ percentile, color, big }) {
+  return (
+    <div className={`ss-track${big ? ' big' : ''}`}>
+      {[5, 20, 50, 80, 95].map((t) => <span key={t} className="ss-tick" style={{ left: `${t}%` }} />)}
+      <span className="ss-marker" style={{ left: `${percentile}%`, background: color, boxShadow: `0 0 10px ${color}` }} />
+    </div>
+  );
+}
+
+function StrengthStanding({ exercises, profile, onProfile }) {
+  const rows = useMemo(() => exercises.map((ex) => {
+    const best = ex.entries.reduce((a, e) => Math.max(a, e.bestE1RM), 0);
+    return { name: ex.name, key: ex.key, best, a: assessStrength({ exerciseName: ex.name, e1rm: best, sex: profile.sex, bodyweight: profile.bodyweight, age: profile.age }) };
+  }), [exercises, profile]);
+
+  const matched = rows.filter((r) => r.a && r.a.matched).sort((a, b) => b.a.percentile - a.a.percentile);
+  const unmatched = rows.filter((r) => r.a && !r.a.matched);
+
+  // Niveau global : moyenne des centiles sur les exercices à barème fiable (hors 'low').
+  const strong = matched.filter((r) => r.a.conf !== 'low');
+  const globalPct = strong.length ? Math.round(strong.reduce((s, r) => s + r.a.percentile, 0) / strong.length) : null;
+  const globalIdx = globalPct == null ? null : levelFromPct(globalPct);
+
+  const num = (v) => (v === '' || v == null || Number.isNaN(Number(v)) ? 0 : Number(v));
+  const bw = num(profile.bodyweight);
+
+  return (
+    <div className="tr-an-panel ss-panel">
+      <div className="lbl">POSITIONNEMENT · FORCE vs PRATIQUANTS</div>
+
+      <div className="ss-profile">
+        <div className="ss-sex">
+          <button className={profile.sex === 'homme' ? 'on' : ''} onClick={() => onProfile({ sex: 'homme' })}>HOMME</button>
+          <button className={profile.sex === 'femme' ? 'on' : ''} onClick={() => onProfile({ sex: 'femme' })}>FEMME</button>
+        </div>
+        <label className="ss-field"><span>POIDS DE CORPS</span>
+          <div className="ss-inp"><input type="number" inputMode="decimal" value={profile.bodyweight} onChange={(e) => onProfile({ bodyweight: num(e.target.value) })} /><i>kg</i></div>
+        </label>
+        <label className="ss-field"><span>ÂGE</span>
+          <div className="ss-inp"><input type="number" inputMode="numeric" value={profile.age} onChange={(e) => onProfile({ age: num(e.target.value) })} /><i>ans</i></div>
+        </label>
+      </div>
+
+      {bw <= 0 && (
+        <div className="ss-empty">Renseigne ton poids de corps ci-dessus — les barèmes se basent sur le ratio charge / poids de corps.</div>
+      )}
+
+      {bw > 0 && globalPct != null && (
+        <div className="ss-head">
+          <div className="ss-head-top">
+            <div>
+              <div className="ss-head-lbl">FORCE GLOBALE ESTIMÉE</div>
+              <div className="ss-head-lvl hdg" style={{ color: LEVEL_COLORS[globalIdx] }}>{LEVELS[globalIdx]}</div>
+            </div>
+            <div className="ss-head-pct">
+              <b style={{ color: LEVEL_COLORS[globalIdx] }}>{globalPct}<sup>e</sup></b>
+              <span>centile · plus fort<br />que ~{globalPct}% des pratiquants</span>
+            </div>
+          </div>
+          <PctBar percentile={globalPct} color={LEVEL_COLORS[globalIdx]} big />
+          <div className="ss-scale">
+            {LEVELS.map((l) => <span key={l}>{l}</span>)}
+          </div>
+          <div className="ss-head-sub">Moyenne sur {strong.length} exercice{strong.length > 1 ? 's' : ''} à barème fiable · barème ajusté à {num(profile.age)} ans</div>
+        </div>
+      )}
+
+      {bw > 0 && (matched.length > 0 ? (
+        <div className="ss-list">
+          {matched.map((r) => {
+            const a = r.a;
+            const col = LEVEL_COLORS[a.levelIndex];
+            return (
+              <div key={r.key} className="ss-ex">
+                <div className="ss-ex-top">
+                  <span className="ss-ex-nm">{r.name}</span>
+                  <span className="ss-chip" style={{ color: col, borderColor: col }}>{a.level}</span>
+                  <span className="ss-ex-pct" style={{ color: col }}>{Math.round(a.percentile)}<sup>e</sup></span>
+                </div>
+                <PctBar percentile={a.percentile} color={col} />
+                <div className="ss-ex-foot">
+                  <span>{a.e1rm} kg e1RM · ratio <b>{a.ratio}×</b> PdC{a.unit === 'db' ? ' (par haltère)' : ''}</span>
+                  {a.conf !== 'high' && <span className="ss-conf">{a.conf === 'low' ? 'machine/isolation — indicatif' : 'indicatif'}</span>}
+                  {a.nextLevel
+                    ? <span className="ss-next">+{a.kgToNext} kg → {a.nextLevel}</span>
+                    : <span className="ss-next" style={{ color: '#ffc266' }}>niveau max atteint</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="ss-empty">Aucun exercice à barème reconnu pour l'instant. Les barèmes couvrent surtout les gros mouvements (squat, développé, soulevé de terre, tirages, curls…).</div>
+      ))}
+
+      {bw > 0 && unmatched.length > 0 && (
+        <div className="ss-unmatched">SANS BARÈME FIABLE · {unmatched.map((r) => r.name).join(' · ')}</div>
+      )}
+
+      <div className="ss-note">
+        Comparaison avec les <b>pratiquants qui enregistrent leurs charges</b> (public déjà entraîné), pas la population générale — face à laquelle ton centile serait bien plus haut. Barèmes indicatifs, basés sur le ratio charge / poids de corps.
+      </div>
     </div>
   );
 }
