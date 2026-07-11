@@ -138,8 +138,17 @@ export default function Training() {
     closePicker();
   }
 
-  async function applyTemplateSwaps() {
-    const updated = sess.exercises.map((ex, ei) => (swaps[ei] ? { ...ex, name: swaps[ei].name, note: swaps[ei].note, wgerId: swaps[ei].wgerId } : ex));
+  // Applique au modèle les remplacements d'exercices ET les changements de nombre de
+  // séries faits pendant la séance (si l'utilisateur choisit de les garder par défaut).
+  async function applyTemplateChanges() {
+    const updated = sess.exercises.map((ex, ei) => {
+      const swapped = swaps[ei] ? { ...ex, name: swaps[ei].name, note: swaps[ei].note, wgerId: swaps[ei].wgerId } : ex;
+      const ids = setIds[ei] || ex.reps.map((_, si) => si);
+      if (ids.length === ex.reps.length) return swapped;
+      const reps = ids.map((id) => parseInt(repsOverride[`${ei}_${id}`], 10) || ex.reps[id] || 10);
+      const allSame = reps.every((r) => r === reps[0]);
+      return { ...swapped, reps, target: allSame ? `${reps.length} × ${reps[0]}` : `${reps.length} séries` };
+    });
     if (supabaseReady) {
       await supabase.from('session_templates').update({ exercises: updated, updated_at: new Date().toISOString() }).eq('key', sessionKey);
     }
@@ -164,6 +173,12 @@ export default function Training() {
   if (sess) exercises.forEach((_ex, ei) => (setIds[ei] || []).forEach((id) => { totalSets++; if (checks[`${ei}_${id}`]) doneSets++; }));
   const pct = totalSets ? Math.round((doneSets / totalSets) * 100) : 0;
 
+  // Séries ajoutées/supprimées par rapport au modèle d'origine, à proposer de garder en fin de séance.
+  const setChanges = sess ? sess.exercises
+    .map((ex, ei) => ({ ei, name: swaps[ei]?.name || ex.name, before: ex.reps.length, after: (setIds[ei] || ex.reps.map((_, si) => si)).length }))
+    .filter((c) => c.before !== c.after) : [];
+  const hasChanges = Object.keys(swaps).length > 0 || setChanges.length > 0;
+
   async function finishSession() {
     if (!sess) return;
     const rpeVals = Object.values(rpe).filter((v) => v != null);
@@ -185,7 +200,7 @@ export default function Training() {
       setSaving(false);
       if (!error && inserted) setHistory((h) => [inserted[0], ...h]);
     }
-    if (Object.keys(swaps).length > 0) setScreen('confirmSwap');
+    if (hasChanges) setScreen('confirmSwap');
     else backToSelect();
   }
 
@@ -341,16 +356,21 @@ export default function Training() {
           <h1 className="hdg">Mettre à jour {sess?.meta.name} ?</h1>
           <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 560 }}>
             {Object.entries(swaps).map(([ei, s]) => (
-              <div key={ei} className="tr-recap-ex" style={{ margin: 0 }}>
+              <div key={`swap-${ei}`} className="tr-recap-ex" style={{ margin: 0 }}>
                 <span style={{ color: '#5a7893' }}>{sess.exercises[ei].name}</span> → <span style={{ color: '#eaf5ff', fontWeight: 600 }}>{s.name}</span>
+              </div>
+            ))}
+            {setChanges.map((c) => (
+              <div key={`setchg-${c.ei}`} className="tr-recap-ex" style={{ margin: 0 }}>
+                <span style={{ color: '#5a7893' }}>{c.name}</span> · <span style={{ color: '#eaf5ff', fontWeight: 600 }}>{c.before} → {c.after} séries</span>
               </div>
             ))}
           </div>
           <div style={{ fontSize: 12, color: '#7fa3c2', marginTop: 14, maxWidth: 560 }}>
-            Cette séance a été enregistrée avec ces remplacements. Veux-tu aussi les garder comme modèle par défaut pour la prochaine fois ?
+            Cette séance a été enregistrée avec ces changements. Veux-tu aussi les garder comme modèle par défaut pour la prochaine fois ?
           </div>
           <div style={{ display: 'flex', gap: 12, marginTop: 22, maxWidth: 560 }}>
-            <button className="tr-finish" style={{ width: 'auto', flex: 1 }} onClick={async () => { await applyTemplateSwaps(); backToSelect(); }}>OUI, METTRE À JOUR</button>
+            <button className="tr-finish" style={{ width: 'auto', flex: 1 }} onClick={async () => { await applyTemplateChanges(); backToSelect(); }}>OUI, METTRE À JOUR</button>
             <button className="tr-navbtn" style={{ flex: 1 }} onClick={backToSelect}>NON, JUSTE CETTE FOIS</button>
           </div>
         </div>
