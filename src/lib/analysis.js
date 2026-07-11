@@ -129,3 +129,91 @@ export function overview(history) {
 
   return { weeks, n30, vol30: Math.round(vol30), up30, low30, daysSince, prs: prs.slice(0, 6) };
 }
+
+// Volume (kg) des séries réellement effectuées d'un log.
+function logVolume(log) {
+  return (log.data?.exercises || []).reduce(
+    (a, ex) => a + (ex.sets || [])
+      .filter((s) => s.checked && Number(s.reps) > 0)
+      .reduce((aa, s) => aa + (Number(s.weight) || 0) * (Number(s.reps) || 0), 0),
+    0,
+  );
+}
+
+function daysBetween(isoA, isoB) {
+  return Math.round((new Date(isoA + 'T12:00:00') - new Date(isoB + 'T12:00:00')) / 86400000);
+}
+
+// Débrief d'une séance pour l'agent Oracle (mode coach) : sélectionne la séance cible
+// (la plus récente par défaut, ou par nom/date), et renvoie un résumé compact et chiffré —
+// perf par exercice, e1RM estimé, records battus, évolution vs la fois précédente du même
+// exercice, comparaison avec la séance de même type, et contexte de fréquence sur 30 j.
+// nameFor(key) résout la clé de séance en nom lisible (via les templates), si fourni.
+export function sessionAnalysis(history, { name, dateISO, nameFor } = {}) {
+  const resolve = typeof nameFor === 'function' ? nameFor : (k) => k;
+  const logs = [...history].sort((a, b) => (a.performed_on < b.performed_on ? 1 : -1)); // récent → ancien
+  if (!logs.length) return { found: false };
+
+  // Sélection de la cible : date exacte > nom/type de séance > dernière séance en date.
+  let target = null;
+  if (dateISO && /^\d{4}-\d{2}-\d{2}$/.test(dateISO)) target = logs.find((l) => l.performed_on === dateISO);
+  if (!target && name) {
+    const q = normName(name);
+    if (q) target = logs.find((l) => {
+      const key = normName(l.session_key), label = normName(resolve(l.session_key));
+      return key === q || label === q || key.includes(q) || label.includes(q);
+    });
+  }
+  if (!target) target = logs[0];
+
+  const idx = exerciseIndex(history);
+  const exercices = (target.data?.exercises || []).map((ex) => {
+    const entries = idx.get(normName(ex.name))?.entries || [];
+    // Entrée de CETTE séance (même date + même clé) et celle qui la précède, pour l'évolution.
+    const pos = entries.findIndex((e) => e.date === target.performed_on && e.sessionKey === target.session_key);
+    const cur = pos >= 0 ? entries[pos] : null;
+    const prev = pos > 0 ? entries[pos - 1] : null;
+    const prior = entries.filter((e) => e.date < target.performed_on);
+    const priorBest = prior.reduce((a, e) => Math.max(a, e.bestE1RM), 0);
+    const e1rm = cur ? cur.bestE1RM : 0;
+    return {
+      nom: ex.name,
+      series: (cur ? cur.sets : []).map((s) => ({ poids: s.weight, reps: s.reps })),
+      volume: cur ? cur.volume : 0,
+      charge_max: cur ? cur.topWeight : 0,
+      e1rm,
+      evolution_e1rm: prev ? Math.round(e1rm - prev.bestE1RM) : null, // vs la dernière fois que l'exo a été fait
+      derniere_fois: prev ? prev.date : null,
+      record: e1rm > 0 && prior.length > 0 && e1rm > priorBest,
+    };
+  });
+
+  const volumeTotal = Math.round(exercices.reduce((a, e) => a + e.volume, 0));
+  const nbSeries = exercices.reduce((a, e) => a + e.series.length, 0);
+  const records = exercices.filter((e) => e.record).map((e) => e.nom);
+
+  const prevSame = logs.find((l) => l.session_key === target.session_key && l.performed_on < target.performed_on);
+  const prevAny = logs.find((l) => l.performed_on < target.performed_on);
+  const ov = overview(history);
+
+  return {
+    found: true,
+    seance: resolve(target.session_key),
+    date: target.performed_on,
+    il_y_a_jours: daysBetween(isoDay(new Date()), target.performed_on),
+    repos_avant_jours: prevAny ? daysBetween(target.performed_on, prevAny.performed_on) : null,
+    rpe_global: target.overall_rpe ?? null,
+    nb_exercices: exercices.length,
+    nb_series: nbSeries,
+    volume_total: volumeTotal,
+    records,
+    exercices,
+    seance_precedente_meme_type: prevSame
+      ? (() => {
+          const v = Math.round(logVolume(prevSame));
+          return { date: prevSame.performed_on, volume: v, evolution_volume: volumeTotal - v };
+        })()
+      : null,
+    contexte_30j: { seances: ov.n30, volume: ov.vol30, upper: ov.up30, lower: ov.low30 },
+  };
+}

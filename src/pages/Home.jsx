@@ -4,6 +4,7 @@ import { peekReturnFlag, clearReturnFlag } from '../lib/coreTransition.js';
 import { askOracle } from '../lib/oracleChat.js';
 import { supabase, supabaseReady } from '../lib/supabase.js';
 import { fetchTaskSummary, createTask } from '../lib/tasks.js';
+import { sessionAnalysis } from '../lib/analysis.js';
 import { synthesizeSpeech } from '../lib/tts.js';
 import './Home.css';
 
@@ -141,6 +142,38 @@ class HomeCanvas extends Component {
           return { ok: true, nom, date: dateISO, exercices: exercises.map((e) => e.name), saved: true };
         } catch (err) {
           return { ok: false, nom, date: dateISO, error: String(err?.message || err) };
+        }
+      },
+    },
+    {
+      name: 'analyser_seance',
+      description: "Débriefe une séance d'entraînement RÉELLEMENT enregistrée : renvoie perf série par série, e1RM " +
+        "estimé, records battus, évolution de chaque exercice vs la fois précédente, comparaison de volume avec la " +
+        "séance de même type et fréquence sur 30 jours. Par défaut la DERNIÈRE séance en date ; on peut cibler par " +
+        "nom/type (upper, lower, jambes…) ou par date. Utilise-le dès que Dylan demande d'analyser, débriefer, " +
+        "commenter ou noter sa séance, ses perfs ou sa progression.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          nom: { type: 'string', description: 'Nom ou type de séance à analyser (ex: upper, lower, jambes). Omettre pour la dernière séance, toutes catégories confondues.' },
+          date_iso: { type: 'string', description: "Date précise de la séance à analyser au format AAAA-MM-JJ, si Dylan la précise (« celle de mardi », « le 8 juillet »…)." },
+        },
+      },
+      run: async (input) => {
+        if (!supabaseReady) return { ok: false, error: 'Supabase non configuré' };
+        try {
+          const [logsRes, tplRes] = await Promise.all([
+            supabase.from('workout_logs').select('*').order('performed_on', { ascending: false }),
+            supabase.from('session_templates').select('key, meta'),
+          ]);
+          if (logsRes.error) return { ok: false, error: logsRes.error.message };
+          const logs = logsRes.data || [];
+          if (!logs.length) return { ok: true, found: false, message: 'Aucune séance enregistrée pour le moment.' };
+          const tpls = tplRes.data || [];
+          const nameFor = (key) => tpls.find((t) => t.key === key)?.meta?.name || String(key).split('_')[0].toUpperCase();
+          return { ok: true, ...sessionAnalysis(logs, { name: input?.nom, dateISO: input?.date_iso, nameFor }) };
+        } catch (err) {
+          return { ok: false, error: String(err?.message || err) };
         }
       },
     },
