@@ -45,7 +45,7 @@ Deno.serve(async (req: Request) => {
 
     const body: Record<string, unknown> = {
       model: 'claude-sonnet-5',
-      max_tokens: 1024, // marge pour les blocs de résultats de recherche web + la réponse finale
+      max_tokens: 2000, // marge : résultats de recherche web + gros appels d'outils (séance détaillée…)
       system: systemPrompt(),
       messages,
       tools: [...(Array.isArray(tools) ? tools : []), WEB_SEARCH_TOOL],

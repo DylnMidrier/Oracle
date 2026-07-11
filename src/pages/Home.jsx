@@ -201,7 +201,7 @@ class HomeCanvas extends Component {
 
   componentWillUnmount() {
     clearInterval(this._clockTimer);
-    clearTimeout(this._t1); clearTimeout(this._t2); clearTimeout(this._bt); clearTimeout(this._navT); clearTimeout(this._silenceT); clearTimeout(this._recStartT);
+    clearTimeout(this._t1); clearTimeout(this._t2); clearTimeout(this._bt); clearTimeout(this._navT); clearTimeout(this._silenceT); clearTimeout(this._recStartT); clearTimeout(this._finishT);
     if (this._raf) cancelAnimationFrame(this._raf);
     window.removeEventListener('resize', this._onResize);
     this._recActive = false;
@@ -541,7 +541,10 @@ class HomeCanvas extends Component {
     this._finalTranscript = '';
     this._recError = null;
     rec.lang = 'fr-FR';
-    rec.continuous = true;
+    // Safari iOS gère très mal le mode continu (résultats jamais délivrés) : on le
+    // désactive sur iOS, où la reconnaissance s'arrête d'elle-même en fin de phrase.
+    const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
+    rec.continuous = !isIOS;
     rec.interimResults = true;
     rec.onresult = (e) => {
       let interim = '';
@@ -550,6 +553,7 @@ class HomeCanvas extends Component {
         if (e.results[i].isFinal) this._finalTranscript += t; else interim += t;
       }
       this.setState({ value: (this._finalTranscript + interim).trim() });
+      if (!this._recActive) return; // résultat tardif pendant la clôture : on accumule sans relancer de minuteur
       clearTimeout(this._silenceT);
       this._silenceT = setTimeout(() => this._finishListening(), 2200);
     };
@@ -574,19 +578,28 @@ class HomeCanvas extends Component {
       return;
     }
     this._recActive = false;
-    this._lastRecEnd = Date.now();
     clearTimeout(this._silenceT);
-    const text = (this._finalTranscript || this.state.value || '').trim();
-    const err = this._recError;
-    // abort() plutôt que stop() : libère immédiatement la session micro (stop() attend la
-    // fin du traitement, ce qui bloque le redémarrage suivant sur iOS). La transcription
-    // est déjà accumulée en direct via onresult, on ne perd rien.
-    try { this._rec?.abort(); } catch { /* noop */ }
+    const rec = this._rec;
     this._rec = null;
-    this.setState({ listening: false });
-    if (text) { this.submit(text); return; }
-    // 'no-speech' = silence normal (grâce à notre propre minuteur) : pas la peine d'alerter.
-    if (err && err !== 'no-speech') this._showAnswer(null, `liaison vocale interrompue (${err}) — réessaie`);
+    let concluded = false;
+    const conclude = () => {
+      if (concluded) return;
+      concluded = true;
+      clearTimeout(this._finishT);
+      this._lastRecEnd = Date.now();
+      this.setState({ listening: false });
+      const text = (this._finalTranscript || this.state.value || '').trim();
+      const err = this._recError;
+      if (text) { this.submit(text); return; }
+      // 'no-speech' = silence normal (notre propre minuteur), 'aborted' = annulation volontaire.
+      if (err && err !== 'no-speech' && err !== 'aborted') this._showAnswer(null, `liaison vocale interrompue (${err}) — réessaie`);
+    };
+    if (!rec) { conclude(); return; }
+    // stop() et non abort() : Safari iOS ne délivre souvent la transcription finale
+    // qu'APRÈS l'arrêt. On laisse ~900 ms aux derniers résultats avant de conclure.
+    rec.onend = conclude;
+    try { rec.stop(); } catch { conclude(); return; }
+    this._finishT = setTimeout(conclude, 900);
   };
 
   toggleVoiceReply = () => {
@@ -653,17 +666,21 @@ class HomeCanvas extends Component {
     synth.speak(u);
   }
 
-  _pushHistory(...entries) {
-    this._history.push(...entries);
-    if (this._history.length > 10) this._history = this._history.slice(-10);
-  }
-
   // La réponse reste affichée tant que l'utilisateur ne la ferme pas lui-même, sauf si
   // la lecture vocale est activée : dans ce cas elle se ferme automatiquement dès que
   // la dictée est terminée (pas de minuteur arbitraire).
   _showAnswer(reply, errorText) {
     this.setState({ phase: 'idle', asking: 'answered', answer: reply || null, askError: errorText || null });
     if (reply && this.state.voiceReply) this._speak(reply, () => this.closeAsk());
+  }
+
+  // Tronque l'historique en gardant des tours complets : il doit commencer par un vrai
+  // message utilisateur (texte), jamais par un tool_result orphelin, sinon l'API rejette
+  // toute la conversation suivante.
+  _commitHistory(convo) {
+    const h = convo.slice(-10);
+    while (h.length && !(h[0].role === 'user' && typeof h[0].content === 'string')) h.shift();
+    this._history = h;
   }
 
   async submit(text) {
@@ -676,38 +693,41 @@ class HomeCanvas extends Component {
     this.setState({ value: '', phase: 'thinking', listening: false, response: '', asking: 'thinking', askQuestion: text, answer: null, askError: null });
 
     const toolSchemas = this.TOOLS.map(({ run, ...schema }) => schema);
-    const userMsg = { role: 'user', content: text.slice(0, 4000) };
-    const res = await askOracle([...this._history, userMsg], toolSchemas);
-    if (seq !== this._askSeq) return;
+    const convo = [...this._history, { role: 'user', content: text.slice(0, 4000) }];
 
-    if (res?.error || !res?.content) { this._showAnswer(null, res?.error || 'liaison interrompue — réessaie'); return; }
+    // Boucle d'outils : Claude peut enchaîner plusieurs actions (ex: ajouter une séance
+    // PUIS une tâche) avant de rendre sa réponse finale en texte.
+    for (let round = 0; round < 5; round++) {
+      const res = await askOracle(convo, toolSchemas);
+      if (seq !== this._askSeq) return;
+      if (res?.error || !res?.content) { this._showAnswer(null, res?.error || 'liaison interrompue — réessaie'); return; }
 
-    if (res.toolUse) {
-      const { id, name, input } = res.toolUse;
-      const tool = this.TOOLS.find((t) => t.name === name);
-      const result = tool ? await tool.run(input) : { ok: false, error: 'Outil inconnu' };
+      if (res.toolUse) {
+        const { id, name, input } = res.toolUse;
+        const tool = this.TOOLS.find((t) => t.name === name);
+        const result = tool ? await tool.run(input) : { ok: false, error: 'Outil inconnu' };
+        if (seq !== this._askSeq) return;
 
-      if (name === 'ouvrir_module') {
-        // openModule() affiche déjà sa propre confirmation visuelle (fichier en ouverture) et
-        // on ne renvoie pas de tool_result ici : on ne garde donc PAS ce tour dans l'historique,
-        // sinon Claude verrait un tool_use sans tool_result et rejetterait la commande suivante.
-        this.setState({ asking: false, askQuestion: '', answer: null, askError: null });
-        return;
+        if (name === 'ouvrir_module') {
+          // openModule() affiche déjà sa propre confirmation visuelle (fichier en ouverture) et
+          // on ne renvoie pas de tool_result ici : on ne garde donc PAS ce tour dans l'historique,
+          // sinon Claude verrait un tool_use sans tool_result et rejetterait la commande suivante.
+          this.setState({ asking: false, askQuestion: '', answer: null, askError: null });
+          return;
+        }
+
+        convo.push({ role: 'assistant', content: res.content });
+        convo.push({ role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: JSON.stringify(result) }] });
+        continue;
       }
 
-      this._pushHistory(userMsg, { role: 'assistant', content: res.content });
-      const toolResultMsg = { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: JSON.stringify(result) }] };
-      const res2 = await askOracle([...this._history, toolResultMsg], toolSchemas);
-      if (seq !== this._askSeq) return;
-      if (res2?.error || !res2?.reply) { this._showAnswer(null, res2?.error || 'liaison interrompue — réessaie'); return; }
-      this._pushHistory(toolResultMsg, { role: 'assistant', content: res2.content });
-      this._showAnswer(res2.reply, null);
+      convo.push({ role: 'assistant', content: res.content });
+      this._commitHistory(convo);
+      if (!res.reply) { this._showAnswer(null, 'réponse vide — réessaie'); return; }
+      this._showAnswer(res.reply, null);
       return;
     }
-
-    this._pushHistory(userMsg, { role: 'assistant', content: res.content });
-    if (!res.reply) { this._showAnswer(null, 'liaison interrompue — réessaie'); return; }
-    this._showAnswer(res.reply, null);
+    this._showAnswer(null, "séquence d'actions trop longue — réessaie en découpant la demande");
   }
 
   closeAsk() {

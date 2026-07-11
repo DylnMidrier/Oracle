@@ -14,6 +14,12 @@ function todayISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// Nom affichable d'une séance : les logs peuvent porter une clé dynamique (séance créée
+// par Oracle puis supprimée/renommée) absente des templates — on retombe sur la clé.
+function sessionName(templates, key) {
+  return templates[key]?.meta?.name || String(key).split('_')[0].toUpperCase();
+}
+
 export default function Training() {
   const { closing, goHome } = useCoreClose();
   const location = useLocation();
@@ -33,6 +39,7 @@ export default function Training() {
   const [timer, setTimer] = useState(0);
   const [timerTotal, setTimerTotal] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [sessionDate, setSessionDate] = useState(todayISO()); // modifiable pour saisir une séance a posteriori
   const [swaps, setSwaps] = useState({}); // { [ei]: { name, note, wgerId } } — remplacements pour la séance en cours
 
   const [pickerEi, setPickerEi] = useState(null);
@@ -79,6 +86,7 @@ export default function Training() {
     const w = {}; const r = {};
     s.exercises.forEach((ex, ei) => ex.reps.forEach((baseReps, si) => { w[`${ei}_${si}`] = String(ctx[ei].defaultWeight); r[`${ei}_${si}`] = String(baseReps); }));
     setSessionKey(key); setWeights(w); setRepsOverride(r); setChecks({}); setRpe({}); setActive(0); setTimer(0); setTimerTotal(0); setSwaps({});
+    setSessionDate(todayISO());
     setScreen('module');
   }
 
@@ -147,7 +155,7 @@ export default function Training() {
     if (supabaseReady) {
       setSaving(true);
       const { data: inserted, error } = await supabase.from('workout_logs')
-        .insert({ session_key: sessionKey, performed_on: todayISO(), overall_rpe: overall, data })
+        .insert({ session_key: sessionKey, performed_on: sessionDate || todayISO(), overall_rpe: overall, data })
         .select();
       setSaving(false);
       if (!error && inserted) setHistory((h) => [inserted[0], ...h]);
@@ -228,6 +236,7 @@ export default function Training() {
             <div className="n hdg">{doneSets}<span>/{totalSets}</span></div>
             <div className="tr-bar"><div style={{ width: `${pct}%` }} /></div>
             <span style={{ fontSize: 11, color: '#5a7893' }}>{pct}%</span>
+            <input type="date" className="tr-date-input" value={sessionDate} onChange={(e) => setSessionDate(e.target.value)} title="Date de la séance (modifiable pour une saisie a posteriori)" />
           </div>
 
           <div className="tr-strip">
@@ -383,7 +392,7 @@ export default function Training() {
                   style={{ background: log ? (up ? 'rgba(77,184,255,.14)' : 'rgba(93,225,255,.12)') : 'rgba(10,25,45,.22)', borderColor: log ? (up ? 'rgba(77,184,255,.5)' : 'rgba(93,225,255,.5)') : 'rgba(120,190,255,.07)' }}
                   onClick={() => log && openRecap(log)}>
                   <span className="day" style={{ color: log ? '#eaf5ff' : '#4a6478' }}>{c.d}</span>
-                  {log && <><span className="tp" style={{ color: col }}>{templates[log.session_key].meta.name}</span><span className="bar" style={{ background: col }} /></>}
+                  {log && <><span className="tp" style={{ color: col }}>{sessionName(templates, log.session_key)}</span><span className="bar" style={{ background: col }} /></>}
                 </div>
               );
             })}
@@ -482,7 +491,7 @@ function ExerciseDetail({ ei, ex, ctx, checks, weights, repsOverride, rpeSel, on
 }
 
 function RecapView({ log, templates, onBack }) {
-  const sess = templates[log.session_key];
+  const meta = templates[log.session_key]?.meta || { name: sessionName(templates, log.session_key), sub: '' };
   const dd = new Date(log.performed_on);
   const dateLabel = dd.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase();
   const accent = log.session_key === 'upper' ? '#4db8ff' : '#5de1ff';
@@ -495,7 +504,7 @@ function RecapView({ log, templates, onBack }) {
       <div className="tr-recap-head">
         <div>
           <div className="dt" style={{ color: accent }}>{dateLabel}</div>
-          <div className="nm hdg">{sess.meta.name} <span style={{ fontSize: 13, color: '#5a7893', fontWeight: 400 }}>· {sess.meta.sub}</span></div>
+          <div className="nm hdg">{meta.name}{meta.sub && <span style={{ fontSize: 13, color: '#5a7893', fontWeight: 400 }}> · {meta.sub}</span>}</div>
         </div>
         <div className="tr-recap-stats">
           <div className="stat"><b>{exercises.length}</b><span>EXOS</span></div>

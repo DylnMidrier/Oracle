@@ -3,7 +3,7 @@
 
 create table if not exists workout_logs (
   id uuid primary key default gen_random_uuid(),
-  session_key text not null check (session_key in ('upper', 'lower')),
+  session_key text not null, -- clé libre : séances upper/lower + séances créées par Oracle (ajouter_seance)
   performed_on date not null default current_date,
   overall_rpe int,
   data jsonb not null, -- { exercises: [{ name, sets: [{ reps, weight, checked }], rpe }] }
@@ -19,7 +19,7 @@ alter table workout_logs disable row level security;
 -- Modèles de séance (Upper/Lower) : éditables via le picker d'exercices wger dans l'appli.
 create table if not exists session_templates (
   id uuid primary key default gen_random_uuid(),
-  key text not null unique check (key in ('upper', 'lower')),
+  key text not null unique, -- clé libre : upper/lower + clés dynamiques des séances créées par Oracle
   meta jsonb not null, -- { name, tag, sub, glyph, dur }
   exercises jsonb not null, -- [{ name, note, target, prev, pr, rest, reps: [...], wgerId? }]
   updated_at timestamptz not null default now()
