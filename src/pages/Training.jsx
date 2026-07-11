@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { SESSIONS } from '../data/sessions.js';
 import { supabase, supabaseReady } from '../lib/supabase.js';
-import { fmtTime, buildExerciseContext, sparkPoints } from '../lib/trainingStats.js';
+import { fmtTime, sparkPoints } from '../lib/trainingStats.js';
+import { buildExerciseContextByName, exerciseIndex, recapStats, overview } from '../lib/analysis.js';
 import { CATEGORIES, fetchExercisesByCategory } from '../lib/wger.js';
 import { useCoreClose } from '../lib/coreTransition.js';
 import './Training.css';
@@ -57,6 +58,7 @@ export default function Training() {
   const [calY, setCalY] = useState(() => new Date().getFullYear());
   const [calM, setCalM] = useState(() => new Date().getMonth());
   const [recapLog, setRecapLog] = useState(null);
+  const [anOpen, setAnOpen] = useState(null); // exercice déplié dans l'écran d'analyse
 
   useEffect(() => {
     if (!supabaseReady) return;
@@ -87,11 +89,20 @@ export default function Training() {
       return swaps[id] ? { ...base, name: swaps[id].name, note: swaps[id].note, wgerId: swaps[id].wgerId } : base;
     });
   }, [sess, exIds, swaps, addedExercises]);
-  const exCtx = useMemo(() => (sess ? buildExerciseContext(history, sessionKey, exercises) : []), [sess, sessionKey, history, exercises]);
+  const exCtx = useMemo(() => (sess ? buildExerciseContextByName(history, exercises) : []), [sess, history, exercises]);
+
+  // Données de l'écran d'analyse : vue d'ensemble + progression par exercice (du plus récent au plus ancien).
+  const ov = useMemo(() => overview(history), [history]);
+  const anExercises = useMemo(
+    () => Array.from(exerciseIndex(history).entries())
+      .map(([key, rec]) => ({ key, ...rec }))
+      .sort((a, b) => (a.entries[a.entries.length - 1].date < b.entries[b.entries.length - 1].date ? 1 : -1)),
+    [history],
+  );
 
   function selectSession(key) {
     const s = templates[key];
-    const ctx = buildExerciseContext(history, key, s.exercises);
+    const ctx = buildExerciseContextByName(history, s.exercises);
     const w = {}; const r = {}; const ids = {};
     s.exercises.forEach((ex, ei) => {
       ids[ei] = ex.reps.map((_, si) => si);
@@ -278,10 +289,13 @@ export default function Training() {
           <button className="tr-icon-btn" onClick={goHome}>‹</button>
           <span className="name hdg">ENTRAÎNEMENT</span>
         </div>
-        {screen !== 'calendar' && screen !== 'recap' && (
-          <button className="tr-icon-btn" title="Historique" onClick={() => setScreen('calendar')}>▦</button>
+        {screen !== 'calendar' && screen !== 'recap' && screen !== 'analyse' && (
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="tr-icon-btn" title="Analyse" onClick={() => setScreen('analyse')}>∿</button>
+            <button className="tr-icon-btn" title="Historique" onClick={() => setScreen('calendar')}>▦</button>
+          </div>
         )}
-        {(screen === 'calendar' || screen === 'recap') && (
+        {(screen === 'calendar' || screen === 'recap' || screen === 'analyse') && (
           <button className="tr-icon-btn" onClick={() => setScreen('select')}>✕</button>
         )}
       </div>
@@ -470,6 +484,122 @@ export default function Training() {
         </div>
       )}
 
+      {screen === 'analyse' && (
+        <div className="tr-an-wrap">
+          <div className="tr-cal-head">
+            <div>
+              <div className="eyebrow">ORACLE // ANALYSE D'ENTRAÎNEMENT</div>
+              <h1 className="hdg">Suivi & progression</h1>
+            </div>
+          </div>
+
+          {loadingHistory && <div style={{ marginTop: 20, fontSize: 12, color: '#5a7893' }}>Chargement de l'historique…</div>}
+          {!loadingHistory && history.length === 0 && (
+            <div style={{ marginTop: 20, fontSize: 12, color: '#7fa3c2', lineHeight: 1.7 }}>
+              Aucune séance enregistrée pour le moment — termine une première séance pour alimenter l'analyse.
+            </div>
+          )}
+
+          {history.length > 0 && (
+            <>
+              <div className="tr-an-stats">
+                <div className="tr-meta-card"><div className="lbl">SÉANCES · 30 J</div><div className="val hdg">{ov.n30}</div></div>
+                <div className="tr-meta-card"><div className="lbl">VOLUME · 30 J</div><div className="val hdg">{(ov.vol30 / 1000).toFixed(1)} t</div></div>
+                <div className="tr-meta-card"><div className="lbl">ÉQUILIBRE U / L</div><div className="val hdg">{ov.up30} / {ov.low30}</div></div>
+                <div className="tr-meta-card"><div className="lbl">DERNIÈRE SÉANCE</div><div className="val hdg">{ov.daysSince == null ? '—' : ov.daysSince === 0 ? "AUJOURD'HUI" : `IL Y A ${ov.daysSince} J`}</div></div>
+              </div>
+
+              <div className="tr-an-panel">
+                <div className="lbl">VOLUME HEBDOMADAIRE · 8 SEMAINES</div>
+                <div className="tr-an-bars">
+                  {(() => {
+                    const maxVol = Math.max(1, ...ov.weeks.map((w) => w.upper + w.lower + w.autres));
+                    return ov.weeks.map((w) => {
+                      const tot = w.upper + w.lower + w.autres;
+                      return (
+                        <div key={w.key} className="col">
+                          <div className="vol">{tot ? `${(tot / 1000).toFixed(1)}t` : ''}</div>
+                          <div className="stack">
+                            {w.autres > 0 && <div style={{ height: `${(w.autres / maxVol) * 100}%`, background: '#9fc0dc' }} />}
+                            {w.lower > 0 && <div style={{ height: `${(w.lower / maxVol) * 100}%`, background: '#5de1ff' }} />}
+                            {w.upper > 0 && <div style={{ height: `${(w.upper / maxVol) * 100}%`, background: '#4db8ff' }} />}
+                          </div>
+                          <div className="wl">{w.label}</div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+                <div className="tr-legend" style={{ marginTop: 14 }}>
+                  <span><span className="sw" style={{ background: '#4db8ff' }} />UPPER</span>
+                  <span><span className="sw" style={{ background: '#5de1ff' }} />LOWER</span>
+                </div>
+              </div>
+
+              {ov.prs.length > 0 && (
+                <div className="tr-an-panel">
+                  <div className="lbl">RECORDS RÉCENTS · e1RM ESTIMÉ</div>
+                  <div className="tr-an-prs">
+                    {ov.prs.map((p, i) => (
+                      <div key={i} className="pr">
+                        <span className="star">★</span>
+                        <span className="nm hdg">{p.name}</span>
+                        <span className="val">{p.e1rm} kg e1RM</span>
+                        <span className="dt">{new Date(p.date + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="tr-an-panel">
+                <div className="lbl">PROGRESSION PAR EXERCICE · e1RM ESTIMÉ (EPLEY)</div>
+                <div className="tr-an-list">
+                  {anExercises.map((exr) => {
+                    const es = exr.entries;
+                    const last = es[es.length - 1];
+                    const prev = es[es.length - 2];
+                    const best = es.reduce((a, e) => Math.max(a, e.bestE1RM), 0);
+                    const d = prev ? last.bestE1RM - prev.bestE1RM : 0;
+                    const dCol = d > 0 ? '#4ade80' : d < 0 ? '#ff6b6b' : '#7fa3c2';
+                    const spark = es.slice(-6).map((e) => e.bestE1RM);
+                    const pts = spark.length > 1 ? sparkPoints(spark, 90, 26, 3) : null;
+                    const open = anOpen === exr.key;
+                    return (
+                      <div key={exr.key} className="tr-an-ex" onClick={() => setAnOpen(open ? null : exr.key)}>
+                        <div className="row">
+                          <div className="nm hdg">{exr.name}</div>
+                          {pts && (
+                            <svg width="90" height="26" style={{ flex: '0 0 auto' }}>
+                              <polyline points={pts.map((p) => `${p.x},${p.y}`).join(' ')} fill="none" stroke="#4db8ff" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+                              <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r="2.5" fill="#5de1ff" />
+                            </svg>
+                          )}
+                          <div className="e1rm hdg">{last.bestE1RM} <span>KG e1RM</span></div>
+                          <div className="delta" style={{ color: dCol }}>{d > 0 ? `▲ +${d}` : d < 0 ? `▼ ${d}` : '='}</div>
+                          <div className="star">{es.length > 1 && last.bestE1RM >= best ? '★' : ''}</div>
+                        </div>
+                        {open && (
+                          <div className="hist">
+                            {[...es].reverse().slice(0, 6).map((e, i) => (
+                              <div key={i} className="hrow">
+                                <span className="dt">{new Date(e.date + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}</span>
+                                <span className="sets">{e.sets.map((s) => `${s.weight}×${s.reps}`).join(' · ')}</span>
+                                <span className="v">{e.bestE1RM} e1RM · {e.volume.toLocaleString('fr-FR')} kg vol</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
       {screen === 'calendar' && (
         <div className="tr-cal-wrap">
           <div className="tr-cal-head">
@@ -511,7 +641,7 @@ export default function Training() {
       )}
 
       {screen === 'recap' && recapLog && (
-        <RecapView log={recapLog} templates={templates} onBack={() => setScreen('calendar')} />
+        <RecapView log={recapLog} templates={templates} history={history} onBack={() => setScreen('calendar')} />
       )}
     </div>
   );
@@ -521,7 +651,7 @@ function ExerciseDetail({ exId, pos, ex, ctx, setIds, checks, weights, repsOverr
   const delta = ctx.delta;
   const dCol = delta > 0 ? '#4ade80' : delta < 0 ? '#ff6b6b' : '#7fa3c2';
   const dArrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '=';
-  const dLabel = delta > 0 ? `+${delta} kg` : delta < 0 ? `${delta} kg` : 'stable';
+  const dLabel = delta > 0 ? `+${delta} kg e1RM` : delta < 0 ? `${delta} kg e1RM` : 'stable';
   const spBig = sparkPoints(ctx.spark, 480, 90, 10);
   const last = spBig[spBig.length - 1];
   const area = spBig.map((p) => `${p.x},${p.y}`).join(' ') + ` ${last.x},90 ${spBig[0].x},90`;
@@ -544,12 +674,20 @@ function ExerciseDetail({ exId, pos, ex, ctx, setIds, checks, weights, repsOverr
       <div className="tr-meta-grid">
         <div className="tr-meta-card"><div className="lbl">CIBLE</div><div className="val hdg">{ex.target}</div></div>
         <div className="tr-meta-card"><div className="lbl">PRÉCÉDENT</div><div className="val hdg">{ctx.prevWeight} kg</div></div>
-        <div className="tr-meta-card"><div className="lbl">RECORD</div><div className="val hdg" style={{ color: '#5de1ff' }}>{ex.pr} kg</div></div>
+        <div className="tr-meta-card"><div className="lbl">RECORD</div><div className="val hdg" style={{ color: '#5de1ff' }}>{ctx.bestWeight || ex.pr || 0} kg</div></div>
         <div className="tr-meta-card"><div className="lbl">REPOS</div><div className="val hdg">{fmtTime(ex.rest)}</div></div>
       </div>
 
+      {ctx.lastSets && (
+        <div className="tr-lastsets">
+          <span className="lbl">DERNIÈRE FOIS · {new Date(ctx.lastDate + 'T12:00:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })}</span>
+          <span className="vals">{ctx.lastSets.map((s) => `${s.weight}×${s.reps}`).join(' · ')}</span>
+          {ctx.bestE1RM && <span className="e1rm">e1RM max {ctx.bestE1RM} kg</span>}
+        </div>
+      )}
+
       <div className="tr-graph">
-        <div className="lbl">PROGRESSION</div>
+        <div className="lbl">PROGRESSION · e1RM ESTIMÉ</div>
         <svg viewBox="0 0 480 90" width="100%" height="80" preserveAspectRatio="none" style={{ marginTop: 8, overflow: 'hidden' }}>
           <polyline points={area} fill="rgba(77,184,255,.08)" stroke="none" />
           <polyline points={spBig.map((p) => `${p.x},${p.y}`).join(' ')} fill="none" stroke="#4db8ff" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
@@ -603,14 +741,16 @@ function ExerciseDetail({ exId, pos, ex, ctx, setIds, checks, weights, repsOverr
   );
 }
 
-function RecapView({ log, templates, onBack }) {
+function RecapView({ log, templates, history, onBack }) {
   const meta = templates[log.session_key]?.meta || { name: sessionName(templates, log.session_key), sub: '' };
   const dd = new Date(log.performed_on);
   const dateLabel = dd.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase();
   const accent = log.session_key === 'upper' ? '#4db8ff' : '#5de1ff';
   const exercises = log.data?.exercises || [];
+  const exStats = recapStats(log, history);
   const setCount = exercises.reduce((a, e) => a + (e.sets?.length || 0), 0);
   const vol = exercises.reduce((a, e) => a + (e.sets || []).reduce((aa, s) => aa + s.weight * s.reps, 0), 0);
+  const nPRs = exStats.filter((s) => s.isPR).length;
 
   return (
     <div className="tr-recap">
@@ -623,13 +763,19 @@ function RecapView({ log, templates, onBack }) {
           <div className="stat"><b>{exercises.length}</b><span>EXOS</span></div>
           <div className="stat"><b>{setCount}</b><span>SÉRIES</span></div>
           <div className="stat"><b style={{ color: '#5de1ff' }}>{vol.toLocaleString('fr-FR')} kg</b><span>VOLUME</span></div>
+          {log.overall_rpe && <div className="stat"><b>{log.overall_rpe}</b><span>RPE</span></div>}
+          {nPRs > 0 && <div className="stat"><b style={{ color: '#ffc266' }}>★ {nPRs}</b><span>RECORD{nPRs > 1 ? 'S' : ''}</span></div>}
         </div>
       </div>
       {exercises.map((ex, i) => (
         <div key={i} className="tr-recap-ex">
           <div className="top">
             <div className="nm">{String(i + 1).padStart(2, '0')} {ex.name}</div>
-            {ex.rpe && <span style={{ fontSize: 11, color: accent }}>RPE {ex.rpe}</span>}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {exStats[i]?.isPR && <span className="prbadge">★ RECORD</span>}
+              {exStats[i]?.bestE1RM > 0 && <span className="e1rmv">{exStats[i].bestE1RM} kg e1RM</span>}
+              {ex.rpe && <span style={{ fontSize: 11, color: accent }}>RPE {ex.rpe}</span>}
+            </div>
           </div>
           <div className="sets">
             {(ex.sets || []).map((s, si) => (

@@ -135,6 +135,51 @@
 
 .tr-note { max-width: 700px; margin: 20px auto; padding: 12px 16px; border: 1px solid rgba(255, 200, 90, .3); background: rgba(255, 200, 90, .07); border-radius: 6px; font-size: 11.5px; color: #f4d58d; }
 
+/* ---- rappel de la dernière perf (en séance) ---- */
+.tr-lastsets { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-top: 14px; padding: 10px 14px; background: rgba(2, 9, 18, .4); border: 1px solid var(--line); border-radius: 6px; }
+.tr-lastsets .lbl { font-size: 8.5px; letter-spacing: .22em; color: var(--accent); white-space: nowrap; }
+.tr-lastsets .vals { font-size: 12px; color: #c3dbef; font-family: 'Chakra Petch', sans-serif; }
+.tr-lastsets .e1rm { margin-left: auto; font-size: 10px; color: #5de1ff; white-space: nowrap; }
+
+/* ---- badges du récap ---- */
+.tr-recap-ex .prbadge { font-size: 8.5px; letter-spacing: .18em; color: #ffc266; border: 1px solid rgba(255, 194, 102, .4); background: rgba(255, 194, 102, .08); padding: 3px 8px; border-radius: 3px; white-space: nowrap; }
+.tr-recap-ex .e1rmv { font-size: 10.5px; color: #5de1ff; white-space: nowrap; }
+
+/* ---- écran d'analyse ---- */
+.tr-an-wrap { max-width: 1000px; margin: 0 auto; padding: 30px 24px 60px; }
+.tr-an-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 24px; }
+.tr-an-panel { margin-top: 16px; padding: 18px 20px; background: rgba(10, 25, 45, .34); border: 1px solid var(--line); border-radius: 8px; }
+.tr-an-panel > .lbl { font-size: 9px; letter-spacing: .24em; color: var(--ink-dimmer); }
+
+.tr-an-bars { display: flex; align-items: stretch; gap: 10px; height: 150px; margin-top: 16px; }
+.tr-an-bars .col { flex: 1; display: flex; flex-direction: column; align-items: center; min-width: 0; }
+.tr-an-bars .vol { font-size: 8.5px; color: #5a7893; height: 14px; white-space: nowrap; }
+.tr-an-bars .stack { flex: 1; width: min(34px, 100%); display: flex; flex-direction: column; justify-content: flex-end; gap: 1px; }
+.tr-an-bars .stack > div { border-radius: 2px 2px 0 0; min-height: 2px; }
+.tr-an-bars .wl { font-size: 8.5px; color: #3d5a75; margin-top: 6px; letter-spacing: .04em; white-space: nowrap; }
+
+.tr-an-prs { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.tr-an-prs .pr { display: flex; align-items: center; gap: 10px; font-size: 11px; padding: 9px 12px; background: rgba(2, 9, 18, .4); border: 1px solid var(--line); border-radius: 6px; flex-wrap: wrap; }
+.tr-an-prs .star { color: #ffc266; }
+.tr-an-prs .nm { color: var(--ink-bright); font-size: 13px; min-width: 0; }
+.tr-an-prs .val { color: #5de1ff; margin-left: auto; white-space: nowrap; }
+.tr-an-prs .dt { color: var(--ink-dimmer); font-size: 10px; }
+
+.tr-an-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.tr-an-ex { cursor: pointer; padding: 12px 14px; background: rgba(2, 9, 18, .35); border: 1px solid var(--line); border-radius: 6px; transition: background .18s, border-color .18s; }
+.tr-an-ex:hover { background: rgba(90, 170, 255, .06); border-color: rgba(120, 190, 255, .3); }
+.tr-an-ex .row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.tr-an-ex .nm { flex: 1 1 160px; font-size: 14px; color: var(--ink-bright); min-width: 0; }
+.tr-an-ex .e1rm { font-size: 15px; color: #eaf5ff; white-space: nowrap; }
+.tr-an-ex .e1rm span { font-size: 8.5px; color: #5a7893; letter-spacing: .08em; }
+.tr-an-ex .delta { font-size: 11px; white-space: nowrap; min-width: 44px; text-align: right; }
+.tr-an-ex .star { color: #ffc266; width: 14px; }
+.tr-an-ex .hist { margin-top: 11px; border-top: 1px solid rgba(120, 190, 255, .1); padding-top: 10px; display: flex; flex-direction: column; gap: 7px; }
+.tr-an-ex .hrow { display: flex; gap: 12px; font-size: 10.5px; color: #7fa3c2; flex-wrap: wrap; }
+.tr-an-ex .hrow .dt { color: #5a7893; width: 40px; flex: 0 0 auto; }
+.tr-an-ex .hrow .sets { flex: 1; min-width: 160px; color: #c3dbef; }
+.tr-an-ex .hrow .v { color: #5a7893; white-space: nowrap; }
+
 @media (max-width: 860px) {
   .tr-body { flex-direction: column; }
   .tr-rail { display: none; }
@@ -146,4 +191,7 @@
   .tr-cards { grid-template-columns: 1fr; }
   .tr-cal-grid { gap: 5px; }
   .tr-cal-cell { min-height: 52px; padding: 5px; }
+  .tr-an-stats { grid-template-columns: 1fr 1fr; }
+  .tr-an-bars { gap: 5px; height: 120px; }
+  .tr-an-bars .col:nth-child(odd) .vol { visibility: hidden; }
 }
