@@ -82,7 +82,12 @@
       "Bash(git commit -m ' *)",
       "Bash(git push *)",
       "Bash(grep -n \"const { tasks, nextSession }\\\\|TÂCHES\\\\|msgs.task\\\\|msgs = {\" /Users/dylan/Oracle/src/pages/Home.jsx)",
-      "Bash(grep -n \"_rec = null;\\\\s*$\\\\|_history = \\\\[\\\\];\\\\|componentWillUnmount\" /Users/dylan/Oracle/src/pages/Home.jsx)"
+      "Bash(grep -n \"_rec = null;\\\\s*$\\\\|_history = \\\\[\\\\];\\\\|componentWillUnmount\" /Users/dylan/Oracle/src/pages/Home.jsx)",
+      "Bash(curl -s \"https://wger.de/api/v2/exercise/search/?term=leg%20curl&language=english&format=json\")",
+      "Bash(curl -s \"https://wger.de/api/v2/\")",
+      "Bash(curl -s \"https://wger.de/api/v2/exercise/search/?term=leg+curl&language=en&format=json\")",
+      "Bash(curl -s \"https://wger.de/api/v2/exerciseinfo/?category=9&limit=100&format=json\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(d.get\\('count'\\)\\); [print\\(t.get\\('name'\\)\\) for r in d['results'] for t in r.get\\('translations',[]\\) if t.get\\('language'\\)==2]\")"
     ],
     "additionalDirectories": [
       "/Users/dylan/Oracle/supabase/functions",

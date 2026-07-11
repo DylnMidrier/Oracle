@@ -34,17 +34,21 @@ export default function Training() {
   const [checks, setChecks] = useState({});
   const [weights, setWeights] = useState({});
   const [repsOverride, setRepsOverride] = useState({});
-  const [setIds, setSetIds] = useState({}); // { [ei]: [id, ...] } — ordre + identité stable des séries d'un exo (ajout/suppression en cours de séance)
+  const [setIds, setSetIds] = useState({}); // { [exId]: [id, ...] } — ordre + identité stable des séries d'un exo (ajout/suppression en cours de séance)
   const nextSetId = useRef(100000);
+  const [exIds, setExIds] = useState([]); // ordre + identité stable des exercices de la séance (ajout/suppression)
+  const [addedExercises, setAddedExercises] = useState({}); // { [exId]: exercice } — exercices ajoutés cette séance (absents du modèle)
+  const nextExId = useRef(500000);
   const [rpe, setRpe] = useState({});
   const [active, setActive] = useState(0);
   const [timer, setTimer] = useState(0);
   const [timerTotal, setTimerTotal] = useState(0);
   const [saving, setSaving] = useState(false);
   const [sessionDate, setSessionDate] = useState(todayISO()); // modifiable pour saisir une séance a posteriori
-  const [swaps, setSwaps] = useState({}); // { [ei]: { name, note, wgerId } } — remplacements pour la séance en cours
+  const [swaps, setSwaps] = useState({}); // { [exId]: { name, note, wgerId } } — remplacements pour la séance en cours
 
-  const [pickerEi, setPickerEi] = useState(null);
+  const [pickerMode, setPickerMode] = useState(null); // 'replace' | 'add' | null
+  const [pickerExId, setPickerExId] = useState(null); // cible en mode 'replace'
   const [pickerCategory, setPickerCategory] = useState(null);
   const [pickerList, setPickerList] = useState([]);
   const [pickerLoading, setPickerLoading] = useState(false);
@@ -76,10 +80,13 @@ export default function Training() {
   }, [timer > 0]);
 
   const sess = sessionKey ? templates[sessionKey] : null;
-  const exercises = useMemo(
-    () => (sess ? sess.exercises.map((ex, ei) => (swaps[ei] ? { ...ex, name: swaps[ei].name, note: swaps[ei].note, wgerId: swaps[ei].wgerId } : ex)) : []),
-    [sess, swaps],
-  );
+  const exercises = useMemo(() => {
+    if (!sess) return [];
+    return exIds.map((id) => {
+      const base = addedExercises[id] || sess.exercises[id];
+      return swaps[id] ? { ...base, name: swaps[id].name, note: swaps[id].note, wgerId: swaps[id].wgerId } : base;
+    });
+  }, [sess, exIds, swaps, addedExercises]);
   const exCtx = useMemo(() => (sess ? buildExerciseContext(history, sessionKey, exercises) : []), [sess, sessionKey, history, exercises]);
 
   function selectSession(key) {
@@ -90,35 +97,60 @@ export default function Training() {
       ids[ei] = ex.reps.map((_, si) => si);
       ex.reps.forEach((baseReps, si) => { w[`${ei}_${si}`] = String(ctx[ei].defaultWeight); r[`${ei}_${si}`] = String(baseReps); });
     });
-    setSessionKey(key); setWeights(w); setRepsOverride(r); setSetIds(ids); setChecks({}); setRpe({}); setActive(0); setTimer(0); setTimerTotal(0); setSwaps({});
+    setSessionKey(key); setWeights(w); setRepsOverride(r); setSetIds(ids);
+    setExIds(s.exercises.map((_, ei) => ei)); setAddedExercises({});
+    setChecks({}); setRpe({}); setActive(0); setTimer(0); setTimerTotal(0); setSwaps({});
     setSessionDate(todayISO());
     setScreen('module');
   }
 
-  function addSet(ei) {
+  function addSet(exId) {
     const id = nextSetId.current++;
-    const list = setIds[ei] || [];
-    const lastKey = list.length ? `${ei}_${list[list.length - 1]}` : null;
-    const w = (lastKey && weights[lastKey] != null) ? weights[lastKey] : String(exCtx[ei]?.defaultWeight ?? 0);
+    const list = setIds[exId] || [];
+    const lastKey = list.length ? `${exId}_${list[list.length - 1]}` : null;
+    const w = (lastKey && weights[lastKey] != null) ? weights[lastKey] : String(exCtx[exIds.indexOf(exId)]?.defaultWeight ?? 0);
     const r = (lastKey && repsOverride[lastKey] != null) ? repsOverride[lastKey] : '10';
-    const k = `${ei}_${id}`;
-    setSetIds((m) => ({ ...m, [ei]: [...(m[ei] || []), id] }));
+    const k = `${exId}_${id}`;
+    setSetIds((m) => ({ ...m, [exId]: [...(m[exId] || []), id] }));
     setWeights((ws) => ({ ...ws, [k]: w }));
     setRepsOverride((rs) => ({ ...rs, [k]: r }));
   }
 
-  function removeSet(ei, id) {
+  function removeSet(exId, id) {
     setSetIds((m) => {
-      const list = m[ei] || [];
+      const list = m[exId] || [];
       if (list.length <= 1) return m; // garder au moins une série
-      return { ...m, [ei]: list.filter((x) => x !== id) };
+      return { ...m, [exId]: list.filter((x) => x !== id) };
     });
+  }
+
+  function addExercise(item) {
+    const exId = nextExId.current++;
+    const equip = item.equipment.length ? ` · ${item.equipment.join(', ')}` : '';
+    const newEx = { name: item.name, note: `Ajouté via wger${equip}`, target: '3 × 10', prev: 0, pr: 0, rest: 90, reps: [10, 10, 10], wgerId: item.id };
+    const ids = [0, 1, 2];
+    setAddedExercises((m) => ({ ...m, [exId]: newEx }));
+    setExIds((cur) => [...cur, exId]);
+    setSetIds((m) => ({ ...m, [exId]: ids }));
+    const w = {}; const r = {};
+    ids.forEach((sid) => { w[`${exId}_${sid}`] = '0'; r[`${exId}_${sid}`] = '10'; });
+    setWeights((ws) => ({ ...ws, ...w }));
+    setRepsOverride((rs) => ({ ...rs, ...r }));
+    setActive(exIds.length);
+  }
+
+  function removeExercise(exId) {
+    if (exIds.length <= 1) return;
+    const newLen = exIds.length - 1;
+    setExIds((ids) => ids.filter((x) => x !== exId));
+    setActive((a) => Math.max(0, Math.min(a, newLen - 1)));
   }
 
   function backToSelect() { setScreen('select'); setSessionKey(null); setTimer(0); setSwaps({}); }
 
-  function openPicker(ei) { setPickerEi(ei); setPickerCategory(null); setPickerList([]); setPickerError(null); }
-  function closePicker() { setPickerEi(null); setPickerCategory(null); setPickerList([]); }
+  function openReplacePicker(exId) { setPickerMode('replace'); setPickerExId(exId); setPickerCategory(null); setPickerList([]); setPickerError(null); }
+  function openAddPicker() { setPickerMode('add'); setPickerExId(null); setPickerCategory(null); setPickerList([]); setPickerError(null); }
+  function closePicker() { setPickerMode(null); setPickerExId(null); setPickerCategory(null); setPickerList([]); }
 
   async function pickCategory(catId) {
     setPickerCategory(catId); setPickerLoading(true); setPickerError(null);
@@ -132,20 +164,25 @@ export default function Training() {
     }
   }
 
-  function applySwap(item) {
-    const equip = item.equipment.length ? ` · ${item.equipment.join(', ')}` : '';
-    setSwaps((s) => ({ ...s, [pickerEi]: { name: item.name, note: `Remplacé via wger${equip}`, wgerId: item.id } }));
+  function applyPicked(item) {
+    if (pickerMode === 'add') {
+      addExercise(item);
+    } else if (pickerExId != null) {
+      const equip = item.equipment.length ? ` · ${item.equipment.join(', ')}` : '';
+      setSwaps((s) => ({ ...s, [pickerExId]: { name: item.name, note: `Remplacé via wger${equip}`, wgerId: item.id } }));
+    }
     closePicker();
   }
 
-  // Applique au modèle les remplacements d'exercices ET les changements de nombre de
-  // séries faits pendant la séance (si l'utilisateur choisit de les garder par défaut).
+  // Applique au modèle les remplacements, ajouts/suppressions d'exercices ET les
+  // changements de nombre de séries faits pendant la séance (si choisi en fin de séance).
   async function applyTemplateChanges() {
-    const updated = sess.exercises.map((ex, ei) => {
-      const swapped = swaps[ei] ? { ...ex, name: swaps[ei].name, note: swaps[ei].note, wgerId: swaps[ei].wgerId } : ex;
-      const ids = setIds[ei] || ex.reps.map((_, si) => si);
-      if (ids.length === ex.reps.length) return swapped;
-      const reps = ids.map((id) => parseInt(repsOverride[`${ei}_${id}`], 10) || ex.reps[id] || 10);
+    const updated = exIds.map((id) => {
+      const base = addedExercises[id] || sess.exercises[id];
+      const swapped = swaps[id] ? { ...base, name: swaps[id].name, note: swaps[id].note, wgerId: swaps[id].wgerId } : base;
+      const ids = setIds[id] || swapped.reps.map((_, si) => si);
+      if (ids.length === swapped.reps.length) return swapped;
+      const reps = ids.map((sid) => parseInt(repsOverride[`${id}_${sid}`], 10) || swapped.reps[sid] || 10);
       const allSame = reps.every((r) => r === reps[0]);
       return { ...swapped, reps, target: allSame ? `${reps.length} × ${reps[0]}` : `${reps.length} séries` };
     });
@@ -155,8 +192,8 @@ export default function Training() {
     setTemplates((t) => ({ ...t, [sessionKey]: { ...t[sessionKey], exercises: updated } }));
   }
 
-  function toggleSet(ei, si, rest) {
-    const key = `${ei}_${si}`;
+  function toggleSet(exId, si, rest) {
+    const key = `${exId}_${si}`;
     setChecks((c) => {
       const now = !c[key];
       if (now) { setTimer(rest); setTimerTotal(rest); }
@@ -167,30 +204,36 @@ export default function Training() {
   function stepWeight(key, d) { setWeights((w) => ({ ...w, [key]: String(Math.max(0, (parseFloat(w[key]) || 0) + d)) })); }
   function setRepCount(key, val) { setRepsOverride((r) => ({ ...r, [key]: val })); }
   function stepRepCount(key, base, d) { setRepsOverride((r) => ({ ...r, [key]: String(Math.max(1, (parseInt(r[key], 10) || base) + d)) })); }
-  function toggleRpe(ei, n) { setRpe((r) => ({ ...r, [ei]: r[ei] === n ? null : n })); }
+  function toggleRpe(exId, n) { setRpe((r) => ({ ...r, [exId]: r[exId] === n ? null : n })); }
 
   let doneSets = 0, totalSets = 0;
-  if (sess) exercises.forEach((_ex, ei) => (setIds[ei] || []).forEach((id) => { totalSets++; if (checks[`${ei}_${id}`]) doneSets++; }));
+  if (sess) exIds.forEach((exId) => (setIds[exId] || []).forEach((id) => { totalSets++; if (checks[`${exId}_${id}`]) doneSets++; }));
   const pct = totalSets ? Math.round((doneSets / totalSets) * 100) : 0;
 
   // Séries ajoutées/supprimées par rapport au modèle d'origine, à proposer de garder en fin de séance.
-  const setChanges = sess ? sess.exercises
-    .map((ex, ei) => ({ ei, name: swaps[ei]?.name || ex.name, before: ex.reps.length, after: (setIds[ei] || ex.reps.map((_, si) => si)).length }))
+  const setChanges = sess ? exIds
+    .filter((id) => !addedExercises[id])
+    .map((id) => ({ id, name: swaps[id]?.name || sess.exercises[id].name, before: sess.exercises[id].reps.length, after: (setIds[id] || []).length }))
     .filter((c) => c.before !== c.after) : [];
-  const hasChanges = Object.keys(swaps).length > 0 || setChanges.length > 0;
+  const removedExerciseNames = sess ? sess.exercises.filter((_ex, id) => !exIds.includes(id)).map((ex) => ex.name) : [];
+  const addedExerciseNames = exIds.filter((id) => addedExercises[id]).map((id) => addedExercises[id].name);
+  const hasChanges = Object.keys(swaps).length > 0 || setChanges.length > 0 || removedExerciseNames.length > 0 || addedExerciseNames.length > 0;
 
   async function finishSession() {
     if (!sess) return;
     const rpeVals = Object.values(rpe).filter((v) => v != null);
     const overall = rpeVals.length ? Math.round(rpeVals.reduce((a, b) => a + b, 0) / rpeVals.length) : null;
     const data = {
-      exercises: exercises.map((ex, ei) => ({
-        name: ex.name, note: ex.note, target: ex.target, rpe: rpe[ei] || null,
-        sets: (setIds[ei] || []).map((id) => {
-          const k = `${ei}_${id}`;
-          return { reps: parseInt(repsOverride[k], 10) || ex.reps[id] || 0, weight: Number(weights[k]) || 0, checked: !!checks[k] };
-        }),
-      })),
+      exercises: exercises.map((ex, pos) => {
+        const exId = exIds[pos];
+        return {
+          name: ex.name, note: ex.note, target: ex.target, rpe: rpe[exId] || null,
+          sets: (setIds[exId] || []).map((id) => {
+            const k = `${exId}_${id}`;
+            return { reps: parseInt(repsOverride[k], 10) || ex.reps[id] || 0, weight: Number(weights[k]) || 0, checked: !!checks[k] };
+          }),
+        };
+      }),
     };
     if (supabaseReady) {
       setSaving(true);
@@ -280,14 +323,15 @@ export default function Training() {
           </div>
 
           <div className="tr-strip">
-            {exercises.map((_ex, ei) => {
-              const ids = setIds[ei] || [];
+            {exercises.map((_ex, pos) => {
+              const exId = exIds[pos];
+              const ids = setIds[exId] || [];
               const setCount = ids.length;
-              const d = ids.filter((id) => checks[`${ei}_${id}`]).length;
+              const d = ids.filter((id) => checks[`${exId}_${id}`]).length;
               const complete = d === setCount;
               return (
-                <div key={ei} className="tr-strip-item" onClick={() => setActive(ei)} style={{ background: active === ei ? 'rgba(77,184,255,.12)' : 'transparent', borderColor: active === ei ? 'rgba(120,190,255,.5)' : 'var(--line)' }}>
-                  <span style={{ color: active === ei ? '#eaf5ff' : '#9fc0dc' }}>{String(ei + 1).padStart(2, '0')}</span>
+                <div key={exId} className="tr-strip-item" onClick={() => setActive(pos)} style={{ background: active === pos ? 'rgba(77,184,255,.12)' : 'transparent', borderColor: active === pos ? 'rgba(120,190,255,.5)' : 'var(--line)' }}>
+                  <span style={{ color: active === pos ? '#eaf5ff' : '#9fc0dc' }}>{String(pos + 1).padStart(2, '0')}</span>
                   <span className="dot" style={{ background: complete ? '#4ade80' : (d > 0 ? '#4db8ff' : '#2c4258') }} />
                 </div>
               );
@@ -296,17 +340,18 @@ export default function Training() {
 
           <div className="tr-body">
             <div className="tr-rail">
-              {exercises.map((ex, ei) => {
-                const ids = setIds[ei] || [];
+              {exercises.map((ex, pos) => {
+                const exId = exIds[pos];
+                const ids = setIds[exId] || [];
                 const setCount = ids.length;
-                const d = ids.filter((id) => checks[`${ei}_${id}`]).length;
+                const d = ids.filter((id) => checks[`${exId}_${id}`]).length;
                 const complete = d === setCount;
-                const delta = exCtx[ei].delta;
+                const delta = exCtx[pos].delta;
                 const dCol = delta > 0 ? '#4ade80' : delta < 0 ? '#ff6b6b' : '#7fa3c2';
                 const dArrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '=';
                 return (
-                  <div key={ei} className={`tr-rail-item${active === ei ? ' active' : ''}`} onClick={() => setActive(ei)}>
-                    <div className="top"><span>{String(ei + 1).padStart(2, '0')}</span><span style={{ color: dCol }}>{dArrow} {delta ? `${delta > 0 ? '+' : ''}${delta} kg` : ''}</span></div>
+                  <div key={exId} className={`tr-rail-item${active === pos ? ' active' : ''}`} onClick={() => setActive(pos)}>
+                    <div className="top"><span>{String(pos + 1).padStart(2, '0')}</span><span style={{ color: dCol }}>{dArrow} {delta ? `${delta > 0 ? '+' : ''}${delta} kg` : ''}</span></div>
                     <div className="nm">{ex.name}</div>
                     <div className="prog">
                       <div className="track"><div style={{ width: `${Math.round((d / setCount) * 100)}%`, background: complete ? 'linear-gradient(90deg,#4ade80,#5de1ff)' : 'linear-gradient(90deg,#3a7bff,#5de1ff)' }} /></div>
@@ -315,17 +360,20 @@ export default function Training() {
                   </div>
                 );
               })}
+              <button className="tr-set-add" style={{ marginTop: 4 }} onClick={openAddPicker}>+ AJOUTER UN EXERCICE</button>
             </div>
 
             <ExerciseDetail
-              ei={active} ex={exercises[active]} ctx={exCtx[active]} setIds={setIds[active] || []}
-              checks={checks} weights={weights} repsOverride={repsOverride} rpeSel={rpe[active]}
+              exId={exIds[active]} pos={active} ex={exercises[active]} ctx={exCtx[active]} setIds={setIds[exIds[active]] || []}
+              checks={checks} weights={weights} repsOverride={repsOverride} rpeSel={rpe[exIds[active]]}
               onToggleSet={toggleSet} onSetWeight={setWeight} onStepWeight={stepWeight}
-              onSetReps={setRepCount} onStepReps={stepRepCount} onSetRpe={(n) => toggleRpe(active, n)}
+              onSetReps={setRepCount} onStepReps={stepRepCount} onSetRpe={(n) => toggleRpe(exIds[active], n)}
               onAddSet={addSet} onRemoveSet={removeSet}
+              onRemoveExercise={() => removeExercise(exIds[active])} canRemoveExercise={exIds.length > 1}
+              onAddExercise={openAddPicker}
               hasPrev={active > 0} hasNext={active < exercises.length - 1}
               onPrev={() => setActive((a) => Math.max(0, a - 1))} onNext={() => setActive((a) => Math.min(exercises.length - 1, a + 1))}
-              onReplace={() => openPicker(active)}
+              onReplace={() => openReplacePicker(exIds[active])}
             />
           </div>
 
@@ -355,14 +403,24 @@ export default function Training() {
           <div className="eyebrow">MODÈLE DE SÉANCE</div>
           <h1 className="hdg">Mettre à jour {sess?.meta.name} ?</h1>
           <div style={{ marginTop: 20, display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 560 }}>
-            {Object.entries(swaps).map(([ei, s]) => (
-              <div key={`swap-${ei}`} className="tr-recap-ex" style={{ margin: 0 }}>
-                <span style={{ color: '#5a7893' }}>{sess.exercises[ei].name}</span> → <span style={{ color: '#eaf5ff', fontWeight: 600 }}>{s.name}</span>
+            {Object.entries(swaps).map(([exId, s]) => (
+              <div key={`swap-${exId}`} className="tr-recap-ex" style={{ margin: 0 }}>
+                <span style={{ color: '#5a7893' }}>{(addedExercises[exId] || sess.exercises[exId])?.name}</span> → <span style={{ color: '#eaf5ff', fontWeight: 600 }}>{s.name}</span>
               </div>
             ))}
             {setChanges.map((c) => (
-              <div key={`setchg-${c.ei}`} className="tr-recap-ex" style={{ margin: 0 }}>
+              <div key={`setchg-${c.id}`} className="tr-recap-ex" style={{ margin: 0 }}>
                 <span style={{ color: '#5a7893' }}>{c.name}</span> · <span style={{ color: '#eaf5ff', fontWeight: 600 }}>{c.before} → {c.after} séries</span>
+              </div>
+            ))}
+            {addedExerciseNames.map((name, i) => (
+              <div key={`added-${i}`} className="tr-recap-ex" style={{ margin: 0 }}>
+                <span style={{ color: '#4ade80' }}>+ {name}</span> <span style={{ color: '#7fa3c2' }}>ajouté</span>
+              </div>
+            ))}
+            {removedExerciseNames.map((name, i) => (
+              <div key={`removed-${i}`} className="tr-recap-ex" style={{ margin: 0 }}>
+                <span style={{ color: '#ff6b6b' }}>− {name}</span> <span style={{ color: '#7fa3c2' }}>supprimé</span>
               </div>
             ))}
           </div>
@@ -376,11 +434,11 @@ export default function Training() {
         </div>
       )}
 
-      {pickerEi != null && (
+      {pickerMode != null && (
         <div className="tr-picker-backdrop" style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(2,6,12,.72)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={closePicker}>
           <div className="tr-recap tr-picker-modal" style={{ margin: 0, maxWidth: 560, width: '100%', maxHeight: '80vh', overflowY: 'auto', background: '#08111f', border: '1px solid var(--line)', borderRadius: 10, padding: 24 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div className="hdg" style={{ fontSize: 18, color: '#eaf5ff' }}>Remplacer un exercice</div>
+              <div className="hdg" style={{ fontSize: 18, color: '#eaf5ff' }}>{pickerMode === 'add' ? 'Ajouter un exercice' : 'Remplacer un exercice'}</div>
               <button className="tr-icon-btn" onClick={closePicker}>✕</button>
             </div>
             {!pickerCategory && (
@@ -398,7 +456,7 @@ export default function Training() {
                 {!pickerLoading && !pickerError && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {pickerList.map((item) => (
-                      <div key={item.id} className="tr-setrow tr-picker-item" style={{ cursor: 'pointer' }} onClick={() => applySwap(item)}>
+                      <div key={item.id} className="tr-setrow tr-picker-item" style={{ cursor: 'pointer' }} onClick={() => applyPicked(item)}>
                         <span style={{ color: '#eaf5ff', fontFamily: "'Chakra Petch',sans-serif" }}>{item.name}</span>
                         {item.equipment.length > 0 && <span style={{ marginLeft: 'auto', fontSize: 11, color: '#7fa3c2' }}>{item.equipment.join(', ')}</span>}
                       </div>
@@ -459,7 +517,7 @@ export default function Training() {
   );
 }
 
-function ExerciseDetail({ ei, ex, ctx, setIds, checks, weights, repsOverride, rpeSel, onToggleSet, onSetWeight, onStepWeight, onSetReps, onStepReps, onSetRpe, onAddSet, onRemoveSet, hasPrev, hasNext, onPrev, onNext, onReplace }) {
+function ExerciseDetail({ exId, pos, ex, ctx, setIds, checks, weights, repsOverride, rpeSel, onToggleSet, onSetWeight, onStepWeight, onSetReps, onStepReps, onSetRpe, onAddSet, onRemoveSet, onRemoveExercise, canRemoveExercise, onAddExercise, hasPrev, hasNext, onPrev, onNext, onReplace }) {
   const delta = ctx.delta;
   const dCol = delta > 0 ? '#4ade80' : delta < 0 ? '#ff6b6b' : '#7fa3c2';
   const dArrow = delta > 0 ? '▲' : delta < 0 ? '▼' : '=';
@@ -472,10 +530,13 @@ function ExerciseDetail({ ei, ex, ctx, setIds, checks, weights, repsOverride, rp
     <div className="tr-detail">
       <div className="tr-detail-head">
         <div>
-          <div className="num">{String(ei + 1).padStart(2, '0')} · EN COURS</div>
+          <div className="num">{String(pos + 1).padStart(2, '0')} · EN COURS</div>
           <div className="exname hdg">{ex.name}</div>
           <div className="note">{ex.note}</div>
-          <button className="tr-navbtn" style={{ marginTop: 10, padding: '4px 12px', height: 30, display: 'inline-flex' }} onClick={onReplace}>⇄ Remplacer</button>
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <button className="tr-navbtn" style={{ padding: '4px 12px', height: 30, display: 'inline-flex' }} onClick={onReplace}>⇄ Remplacer</button>
+            <button className="tr-navbtn tr-navbtn-danger" style={{ padding: '4px 12px', height: 30, display: 'inline-flex' }} disabled={!canRemoveExercise} onClick={onRemoveExercise}>✕ Supprimer</button>
+          </div>
         </div>
         <div className="tr-delta" style={{ color: dCol }}>{dArrow} {dLabel}</div>
       </div>
@@ -498,7 +559,7 @@ function ExerciseDetail({ ei, ex, ctx, setIds, checks, weights, repsOverride, rp
 
       <div className="tr-sets">
         {setIds.map((id, idx) => {
-          const key = `${ei}_${id}`;
+          const key = `${exId}_${id}`;
           const checked = !!checks[key];
           const weight = weights[key] != null ? weights[key] : String(ctx.defaultWeight);
           const baseReps = ex.reps[id] ?? 10;
@@ -518,12 +579,12 @@ function ExerciseDetail({ ei, ex, ctx, setIds, checks, weights, repsOverride, rp
                 <button onClick={() => onStepWeight(key, 2.5)}>+</button>
                 <span className="kg">kg</span>
               </div>
-              <button className={`tr-check${checked ? ' done' : ''}`} onClick={() => onToggleSet(ei, id, ex.rest)}>{checked ? '✓' : ''}</button>
-              <button className="tr-set-remove" title="Supprimer cette série" disabled={setIds.length <= 1} onClick={() => onRemoveSet(ei, id)}>✕</button>
+              <button className={`tr-check${checked ? ' done' : ''}`} onClick={() => onToggleSet(exId, id, ex.rest)}>{checked ? '✓' : ''}</button>
+              <button className="tr-set-remove" title="Supprimer cette série" disabled={setIds.length <= 1} onClick={() => onRemoveSet(exId, id)}>✕</button>
             </div>
           );
         })}
-        <button className="tr-set-add" onClick={() => onAddSet(ei)}>+ AJOUTER UNE SÉRIE</button>
+        <button className="tr-set-add" onClick={() => onAddSet(exId)}>+ AJOUTER UNE SÉRIE</button>
       </div>
 
       <div className="tr-rpe-row">
@@ -535,6 +596,7 @@ function ExerciseDetail({ ei, ex, ctx, setIds, checks, weights, repsOverride, rp
 
       <div className="tr-navrow">
         <button className="tr-navbtn" disabled={!hasPrev} onClick={onPrev}>‹ PRÉC.</button>
+        <button className="tr-navbtn" onClick={onAddExercise}>+ EXERCICE</button>
         <button className="tr-navbtn" disabled={!hasNext} onClick={onNext}>SUIV. ›</button>
       </div>
     </div>

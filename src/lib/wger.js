@@ -35,10 +35,19 @@ const cache = new Map();
 
 export async function fetchExercisesByCategory(categoryId) {
   if (cache.has(categoryId)) return cache.get(categoryId);
-  const res = await fetch(`${BASE}/exerciseinfo/?category=${categoryId}&limit=100`);
-  if (!res.ok) throw new Error(`wger: HTTP ${res.status}`);
-  const json = await res.json();
-  const list = json.results
+  // Certaines catégories dépassent largement 100 exercices (ex: Jambes = 192) : il faut
+  // suivre la pagination de l'API, sinon des exercices bien réels (ex: "Leg curl (allongé)")
+  // restent invisibles simplement parce qu'ils sont sur une page suivante.
+  let url = `${BASE}/exerciseinfo/?category=${categoryId}&limit=100`;
+  const results = [];
+  while (url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`wger: HTTP ${res.status}`);
+    const json = await res.json();
+    results.push(...json.results);
+    url = json.next;
+  }
+  const list = results
     .map((r) => {
       const t = pickTranslation(r.translations || []);
       if (!t?.name) return null;

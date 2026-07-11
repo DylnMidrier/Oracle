@@ -87,6 +87,9 @@
 .tr-navrow { display: flex; gap: 10px; margin-top: 24px; }
 .tr-navbtn { flex: 1; height: 44px; display: flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; letter-spacing: .1em; color: #9fc0dc; background: transparent; cursor: pointer; }
 .tr-navbtn:disabled { color: #2c4258; cursor: default; }
+.tr-navbtn-danger { border-color: rgba(255, 107, 107, .3); color: #ff6b6b; }
+.tr-navbtn-danger:hover:not(:disabled) { background: rgba(255, 107, 107, .1); }
+.tr-navbtn-danger:disabled { color: #4a3232; border-color: rgba(255, 107, 107, .12); }
 .tr-finish { margin-top: 24px; width: 100%; height: 48px; border-radius: 8px; border: 1px solid rgba(77, 222, 128, .4); background: rgba(74, 222, 128, .1); color: #4ade80; font-family: 'Chakra Petch', sans-serif; font-size: 14px; letter-spacing: .12em; cursor: pointer; }
 .tr-finish:hover { background: rgba(74, 222, 128, .18); }
 .tr-finish:disabled { opacity: .5; cursor: default; }
