@@ -43,6 +43,8 @@ export default function WorldWatch() {
   const offRef = useRef(0);
   const hitsRef = useRef([]);
   const tRef = useRef(0);
+  const lockRef = useRef({ id: null, t: 0 });
+  const dimRef = useRef(0);
 
   async function load() {
     const data = await fetchArticles();
@@ -100,6 +102,14 @@ export default function WorldWatch() {
     const rot = rotRef.current;
     const tilt = tiltRef.current;
 
+    // Verrouillage cible : progression 0 → 1 relancée à chaque nouvelle sélection,
+    // + facteur d'estompage global du reste de la scène.
+    if (lockRef.current.id !== selectedId) lockRef.current = { id: selectedId, t: 0 };
+    if (selectedId) lockRef.current.t = Math.min(1, lockRef.current.t + 0.045);
+    const lockE = 1 - Math.pow(1 - lockRef.current.t, 3);
+    dimRef.current += ((selected ? 1 : 0) - dimRef.current) * 0.08;
+    const dim = dimRef.current;
+
     // Zoom desktop sur la région du signal sélectionné (retour fluide à la fermeture)
     const zoomIn = selected && window.innerWidth > 900;
     const zTarget = zoomIn ? 1.7 : 1;
@@ -126,7 +136,7 @@ export default function WorldWatch() {
     landDots().forEach((d) => {
       const p = projectGlobe(d.la, d.lo, rot, R, tilt);
       if (p.z <= 0.02) return;
-      ctx.globalAlpha = 0.16 + 0.55 * p.z;
+      ctx.globalAlpha = (0.16 + 0.55 * p.z) * (1 - dim * 0.35);
       ctx.fillStyle = '#7fc4ff';
       ctx.fillRect(cx + p.x - 0.7, cy + p.y - 0.7, 1.4, 1.4);
     });
@@ -143,35 +153,66 @@ export default function WorldWatch() {
       const h = sel ? 0.3 : 0.16;
       const tip = projectGlobe(la, lo, rot, R * (1 + h), tilt);
       const tx = cx + tip.x, ty = cy + tip.y;
-      const vis = 0.35 + 0.65 * p.z;
+      // profondeur + estompage des non-cibles quand un signal est verrouillé
+      const fade = sel ? 1 : 1 - dim * 0.82;
+      const vis = (0.35 + 0.65 * p.z) * fade;
 
       const grad = ctx.createLinearGradient(bx, by, tx, ty);
       grad.addColorStop(0, `${sv.col}e6`);
       grad.addColorStop(1, `${sv.col}00`);
       ctx.strokeStyle = grad;
-      ctx.lineWidth = sel ? 2.4 : 1.3;
+      ctx.lineWidth = sel ? 2.4 : m.sev === 'crit' ? 1.3 : m.sev === 'ele' ? 1.1 : 0.85;
       ctx.globalAlpha = vis;
       ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(tx, ty); ctx.stroke();
 
-      const ringR = (t * 26 + i * 9) % 24;
-      ctx.globalAlpha = vis * (1 - ringR / 24) * 0.8;
-      ctx.beginPath(); ctx.arc(bx, by, 3 + ringR, 0, Math.PI * 2);
-      ctx.strokeStyle = sv.col; ctx.lineWidth = 1; ctx.stroke();
+      // Hiérarchie : seuls les signaux critiques émettent un ping (coupé quand une cible est verrouillée)
+      if (m.sev === 'crit' && !sel) {
+        const ringR = (t * 26 + i * 9) % 24;
+        ctx.globalAlpha = vis * (1 - ringR / 24) * 0.8 * (1 - dim);
+        ctx.beginPath(); ctx.arc(bx, by, 3 + ringR, 0, Math.PI * 2);
+        ctx.strokeStyle = sv.col; ctx.lineWidth = 1; ctx.stroke();
+      }
 
+      // Point de base : halo pour les critiques, pulsation douce pour ÉLEVÉ, statique pour SURVEILLANCE
+      let dotR = sel ? 3.4 : m.sev === 'crit' ? 2.4 : m.sev === 'ele' ? 2 : 1.6;
+      if (m.sev === 'ele' && !sel) dotR += Math.sin(t * 2.4 + i * 1.7) * 0.45;
+      if (m.sev === 'crit') {
+        ctx.globalAlpha = vis * 0.28;
+        ctx.fillStyle = sv.col;
+        ctx.beginPath(); ctx.arc(bx, by, dotR + 3.5, 0, Math.PI * 2); ctx.fill();
+      }
       ctx.globalAlpha = vis;
       ctx.fillStyle = sv.col;
-      ctx.beginPath(); ctx.arc(bx, by, sel ? 3.4 : 2.2, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(tx, ty, sel ? 3 : 1.8, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(bx, by, dotR, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(tx, ty, sel ? 3 : m.sev === 'surv' ? 1.5 : 1.8, 0, Math.PI * 2); ctx.fill();
 
       if (sel) {
-        const s = 11;
-        ctx.strokeStyle = sv.col; ctx.lineWidth = 1.2; ctx.globalAlpha = 0.9;
+        // Verrouillage cible : brackets qui convergent, réticule rotatif, beacon
+        const conv = 1 + (1 - lockE) * 1.9;
+        const s = 11 * conv;
+        ctx.strokeStyle = sv.col; ctx.lineWidth = 1.2;
+        ctx.globalAlpha = 0.9 * lockE;
         ctx.beginPath();
         ctx.moveTo(tx - s, ty - s + 5); ctx.lineTo(tx - s, ty - s); ctx.lineTo(tx - s + 5, ty - s);
         ctx.moveTo(tx + s - 5, ty - s); ctx.lineTo(tx + s, ty - s); ctx.lineTo(tx + s, ty - s + 5);
         ctx.moveTo(tx + s, ty + s - 5); ctx.lineTo(tx + s, ty + s); ctx.lineTo(tx + s - 5, ty + s);
         ctx.moveTo(tx - s + 5, ty + s); ctx.lineTo(tx - s, ty + s); ctx.lineTo(tx - s, ty + s - 5);
         ctx.stroke();
+
+        ctx.save();
+        ctx.translate(tx, ty);
+        ctx.rotate(t * 0.8);
+        ctx.setLineDash([5, 7]);
+        ctx.globalAlpha = 0.55 * lockE;
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.arc(0, 0, 17, 0, Math.PI * 2); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+
+        const bk = (t * 18) % 26;
+        ctx.globalAlpha = (1 - bk / 26) * 0.85 * lockE;
+        ctx.beginPath(); ctx.arc(bx, by, 3 + bk, 0, Math.PI * 2);
+        ctx.strokeStyle = sv.col; ctx.lineWidth = 1.4; ctx.stroke();
       }
       ctx.globalAlpha = 1;
       hits.push({ id: m.id, x: tx, y: ty }, { id: m.id, x: bx, y: by });
