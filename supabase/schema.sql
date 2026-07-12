@@ -51,6 +51,22 @@ alter table world_watch_articles disable row level security;
 
 -- L'Edge Function nécessite un secret ANTHROPIC_API_KEY (Dashboard Supabase >
 -- Edge Functions > world-watch-refresh > Secrets, ou `supabase secrets set`).
+--
+-- Anti-doublons : la fonction écarte les articles déjà en base par URL (contrainte
+-- unique ci-dessus) ET par titre normalisé (même sujet publié par plusieurs sources),
+-- et purge en fin de run les articles dont published_at dépasse 30 heures.
+--
+-- Actualisation automatique horaire via pg_cron + pg_net (en plus du bouton ↻ de l'app) :
+--   create extension if not exists pg_cron;
+--   create extension if not exists pg_net;
+--   select cron.schedule(
+--     'world-watch-hourly', '0 * * * *',
+--     $job$ select net.http_post(
+--       url := 'https://<project-ref>.supabase.co/functions/v1/world-watch-refresh',
+--       headers := jsonb_build_object('Content-Type','application/json','Authorization','Bearer <ANON_KEY>'),
+--       body := '{}'::jsonb, timeout_milliseconds := 120000) $job$);
+-- Retrait du job : select cron.unschedule('world-watch-hourly');
+-- Historique d'exécution : select * from cron.job_run_details order by start_time desc;
 
 -- Santé : métriques Apple Watch / AutoSleep reçues via l'automatisation iOS
 -- (Raccourcis) qui POST sur l'Edge Function supabase/functions/health-ingest.

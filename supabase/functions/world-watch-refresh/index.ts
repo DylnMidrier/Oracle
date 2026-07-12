@@ -41,21 +41,30 @@ Deno.serve(async (req: Request) => {
     const results = await Promise.allSettled(FEEDS.map((f) => fetchFeed(f.url, f.name)));
     const rawArticles = results.flatMap((r) => (r.status === 'fulfilled' ? r.value : []));
 
-    const seen = new Set<string>();
-    const deduped = rawArticles.filter((a) => {
-      if (!a.url || seen.has(a.url)) return false;
-      seen.add(a.url);
-      return true;
-    });
-
+    // Anti-doublons : on écarte les articles déjà en base — par URL ET par titre normalisé,
+    // pour capter le même sujet publié par plusieurs sources sous des URL différentes — ainsi
+    // que les doublons au sein d'un même run. La table étant bornée par la purge (voir plus
+    // bas), charger toutes les URL/titres existants reste peu coûteux.
     const { data: existing } = await supabase
       .from('world_watch_articles')
-      .select('url')
-      .in('url', deduped.map((a) => a.url));
+      .select('url, title');
     const existingUrls = new Set((existing || []).map((r: { url: string }) => r.url));
+    const existingTitles = new Set((existing || []).map((r: { title: string }) => normTitle(r.title)));
 
-    // Plafond par run pour maîtriser le coût des appels Claude sur un clic manuel.
-    const toProcess = deduped.filter((a) => !existingUrls.has(a.url)).slice(0, 30);
+    const seenUrl = new Set<string>();
+    const seenTitle = new Set<string>();
+    // Plafond par run pour maîtriser le coût des appels Claude.
+    const toProcess: RawArticle[] = [];
+    for (const a of rawArticles) {
+      if (toProcess.length >= 30) break;
+      const nt = normTitle(a.title);
+      if (!a.url || !nt) continue;
+      if (seenUrl.has(a.url) || existingUrls.has(a.url)) continue;
+      if (seenTitle.has(nt) || existingTitles.has(nt)) continue;
+      seenUrl.add(a.url);
+      seenTitle.add(nt);
+      toProcess.push(a);
+    }
 
     let inserted = 0;
     const CONCURRENCY = 5;
@@ -78,8 +87,16 @@ Deno.serve(async (req: Request) => {
       }));
     }
 
+    // Purge : on ne garde que les articles publiés dans les 30 dernières heures
+    // (published_at), maintenant que l'actualisation tourne automatiquement chaque heure.
+    const cutoff = new Date(Date.now() - 30 * 3600 * 1000).toISOString();
+    const { count: purged } = await supabase
+      .from('world_watch_articles')
+      .delete({ count: 'exact' })
+      .lt('published_at', cutoff);
+
     return new Response(
-      JSON.stringify({ fetched: rawArticles.length, candidates: deduped.length, processed: toProcess.length, inserted }),
+      JSON.stringify({ fetched: rawArticles.length, processed: toProcess.length, inserted, purged: purged ?? 0 }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
     );
   } catch (err) {
@@ -156,4 +173,14 @@ function clean(s: string): string {
   return inner
     .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+}
+
+// Titre normalisé (minuscules, sans accents ni ponctuation) pour la déduplication
+// inter-sources : deux titres identiques à la casse/ponctuation près = même sujet.
+function normTitle(s: string): string {
+  return (s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
 }

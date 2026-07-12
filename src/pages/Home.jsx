@@ -3,7 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { peekReturnFlag, clearReturnFlag } from '../lib/coreTransition.js';
 import { askOracle } from '../lib/oracleChat.js';
 import { supabase, supabaseReady } from '../lib/supabase.js';
-import { fetchTaskSummary, createTask } from '../lib/tasks.js';
+import { fetchTaskSummary, fetchActiveTasks, createTask, updateTaskStatus } from '../lib/tasks.js';
+import { fetchArticles, fetchWorldWatchSummary } from '../lib/worldWatch.js';
+import { fetchHealth } from '../lib/health.js';
+import { fetchWorkoutLogs, trainingSummary } from '../lib/trainingSummary.js';
+import { computeReadiness } from '../lib/readiness.js';
+import { fetchWeather } from '../lib/weather.js';
 import { sessionAnalysis } from '../lib/analysis.js';
 import { synthesizeSpeech } from '../lib/tts.js';
 import './Home.css';
@@ -21,12 +26,16 @@ function slugify(s) {
 const USER_NAME = 'Dylan';
 const ACCENT = '#4db8ff';
 
-const STATUS_LINES = [
-  'SANTÉ — énergie 82 %, sommeil 7 h 20, constantes stables.',
-  'MÉTÉO — 14°, ciel dégagé, nuit claire à prévoir.',
-  'ENTRAÎNEMENT — séance jambes programmée 18:00.',
-  'AGENDA — 3 tâches prioritaires, 5 événements. RAS.',
-];
+function fmtSleepH(hours) {
+  if (hours == null) return '—';
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+  return `${h} h ${String(m).padStart(2, '0')}`;
+}
+
+function normTask(s) {
+  return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+}
 
 class HomeCanvas extends Component {
   canvasRef = createRef();
@@ -52,7 +61,11 @@ class HomeCanvas extends Component {
     asking: false, askQuestion: '', answer: null, askError: null,
     voiceReply: typeof localStorage !== 'undefined' && localStorage.getItem('oracleVoiceReply') === '1',
     taskSummary: { count: 0, top: null },
-    nextSession: { groupe: 'Jambes', jour: '18:00' },
+    health: null,
+    weather: null,
+    readiness: null,
+    training: { weekCount: 0, weekTarget: 4, nextLabel: null, daysSince: null },
+    veille: { crit: 0, warn: 0, total: 0 },
   };
 
   // Catalogue de commandes déclenchables par Oracle depuis la barre de commande.
@@ -171,7 +184,9 @@ class HomeCanvas extends Component {
           if (!logs.length) return { ok: true, found: false, message: 'Aucune séance enregistrée pour le moment.' };
           const tpls = tplRes.data || [];
           const nameFor = (key) => tpls.find((t) => t.key === key)?.meta?.name || String(key).split('_')[0].toUpperCase();
-          return { ok: true, ...sessionAnalysis(logs, { name: input?.nom, dateISO: input?.date_iso, nameFor }) };
+          const r = this.state.readiness;
+          const forme_actuelle = r ? { indice: r.score, niveau: r.level, conseil: r.verdict } : null;
+          return { ok: true, ...sessionAnalysis(logs, { name: input?.nom, dateISO: input?.date_iso, nameFor }), forme_actuelle };
         } catch (err) {
           return { ok: false, error: String(err?.message || err) };
         }
@@ -207,16 +222,115 @@ class HomeCanvas extends Component {
     },
     {
       name: 'statut_systeme',
-      description: "Consulte l'état actuel du système (énergie, alertes, séance prévue, tâches) pour répondre aux questions de synthèse (ex : « résume ma journée »).",
+      description: "Consulte l'état de bord RÉEL et synthétique (forme du jour, sommeil, VFC, entraînement de la " +
+        "semaine, prochaine séance conseillée, tâches actives, signaux de veille, météo) pour répondre aux questions " +
+        "de synthèse (ex : « résume ma journée », « fais le point »).",
       input_schema: { type: 'object', properties: {} },
-      run: () => ({
-        energie: '82 %',
-        sommeil: '7 h 20',
-        prochaine_seance: `${this.state.nextSession.groupe} · ${this.state.nextSession.jour}`,
-        taches_en_cours: this.state.taskSummary.count,
-        tache_prioritaire: this.state.taskSummary.top,
-        prochain_evenement: 'Standup à 09:30, 5 événements',
-      }),
+      run: () => {
+        const { readiness, health, training, taskSummary, veille, weather } = this.state;
+        return {
+          forme: readiness ? `${readiness.level} · ${readiness.score}/100 — ${readiness.verdict}` : 'données santé indisponibles',
+          sommeil: health?.sleep_hours != null ? fmtSleepH(health.sleep_hours) : '—',
+          vfc_ms: health?.hrv != null ? Math.round(health.hrv) : null,
+          fc_repos: health?.heart_rate_resting ?? null,
+          prochaine_seance: training?.nextLabel ? `${training.nextLabel} conseillée` : 'aucune séance enregistrée',
+          entrainement_semaine: `${training?.weekCount ?? 0} / ${training?.weekTarget ?? 4} séances`,
+          jours_depuis_derniere_seance: training?.daysSince ?? null,
+          taches_actives: taskSummary.count,
+          tache_prioritaire: taskSummary.top,
+          veille_48h: `${veille?.crit ?? 0} critiques, ${veille?.total ?? 0} signaux`,
+          meteo: weather ? `${weather.temp}°, ${weather.label} (ressenti ${weather.feels}°)` : 'indisponible',
+        };
+      },
+    },
+    {
+      name: 'consulter_sante',
+      description: "Consulte les données de santé RÉELLES (Apple Watch / AutoSleep) : dernières mesures (sommeil, VFC, " +
+        "fréquence cardiaque, pas, activité) et l'indice de forme/récupération du jour. Utilise-le pour toute question " +
+        "sur le sommeil, la récupération, la forme, « je peux pousser aujourd'hui ? », la fréquence cardiaque, les pas.",
+      input_schema: { type: 'object', properties: {} },
+      run: async () => {
+        const { latest, trend } = await fetchHealth();
+        if (!latest) return { ok: true, found: false, message: 'Aucune donnée de santé enregistrée (Apple Watch non connectée).' };
+        const ts = trainingSummary(await fetchWorkoutLogs());
+        const r = computeReadiness(latest, { daysSinceTraining: ts.daysSince });
+        return {
+          ok: true, found: true,
+          date: latest.date,
+          sommeil_h: latest.sleep_hours ?? null,
+          score_sommeil_sur5: latest.sleep_score ?? null,
+          vfc_ms: latest.hrv ?? null,
+          vfc_base_ms: latest.hrv_baseline ?? null,
+          fc_repos: latest.heart_rate_resting ?? null,
+          fc_max: latest.heart_rate_max ?? null,
+          pas: latest.steps ?? null,
+          calories_actives: latest.active_calories ?? null,
+          minutes_exercice: latest.exercise_minutes ?? null,
+          forme: r ? { indice: r.score, niveau: r.level, conseil: r.verdict, facteurs: r.factors.map((f) => `${f.label} ${f.score}`) } : null,
+          tendance_sommeil_7j: trend.map((x) => x.sleep_hours).filter((v) => v != null),
+        };
+      },
+    },
+    {
+      name: 'gerer_taches',
+      description: "Consulte ou met à jour les tâches RÉELLES du module Tâches. action=lister renvoie les tâches actives " +
+        "(priorité, catégorie, échéance, progression) ; action=clore ferme une tâche identifiée par son intitulé (approximatif).",
+      input_schema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['lister', 'clore'], description: 'lister les tâches actives, ou clore une tâche' },
+          tache: { type: 'string', description: 'Intitulé (même approximatif) de la tâche à clore — requis si action=clore' },
+        },
+        required: ['action'],
+      },
+      run: async (input) => {
+        const tasks = await fetchActiveTasks();
+        if (input?.action === 'clore') {
+          const q = normTask(input?.tache || '');
+          if (!q) return { ok: false, error: 'Intitulé de la tâche à clore manquant' };
+          const match = tasks.find((t) => { const n = normTask(t.title); return n.includes(q) || q.includes(n); });
+          if (!match) return { ok: false, error: 'Aucune tâche active ne correspond', taches_actives: tasks.map((t) => t.title) };
+          await updateTaskStatus(match.id, 'clos');
+          this._loadTaskSummary();
+          return { ok: true, action: 'clore', tache: match.title };
+        }
+        return {
+          ok: true, action: 'lister', total: tasks.length,
+          taches: tasks.map((t) => ({
+            titre: t.title, priorite: t.priority, categorie: t.category || null, echeance: t.due_at || null,
+            progression_pct: t.subs?.length ? Math.round((100 * t.subs.filter((s) => s.done).length) / t.subs.length) : 0,
+          })),
+        };
+      },
+    },
+    {
+      name: 'consulter_veille',
+      description: "Consulte les signaux de veille mondiale RÉELS déjà indexés (titres, résumés IA, urgence, région, source). " +
+        "Filtre possible par urgence. Utilise-le pour « quoi de neuf ? », « des alertes critiques ? », un point sur l'actualité surveillée.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          urgence: { type: 'string', enum: ['critical', 'warning', 'all'], description: "critical = critiques seuls ; warning = critiques + élevés ; all = tout (défaut)" },
+          limite: { type: 'integer', description: 'Nombre de signaux à renvoyer (défaut 8, max 20)' },
+        },
+      },
+      run: async (input) => {
+        const articles = await fetchArticles();
+        if (!articles.length) return { ok: true, found: false, message: 'Aucun signal indexé. Lance une actualisation depuis le module Veille.' };
+        let list = articles;
+        if (input?.urgence === 'critical') list = articles.filter((a) => a.urgency === 'critical');
+        else if (input?.urgence === 'warning') list = articles.filter((a) => a.urgency === 'critical' || a.urgency === 'warning');
+        const limit = Math.min(Math.max(Number(input?.limite) || 8, 1), 20);
+        return {
+          ok: true, found: true,
+          total: articles.length,
+          critiques: articles.filter((a) => a.urgency === 'critical').length,
+          signaux: list.slice(0, limit).map((a) => ({
+            titre: a.title, resume: a.summary, urgence: a.urgency, region: a.region || 'Mondial',
+            categorie: a.category, source: a.source, publie_le: a.published_at,
+          })),
+        };
+      },
     },
   ];
 
@@ -232,11 +346,26 @@ class HomeCanvas extends Component {
     else this._startBoot();
     this._initCanvas();
     this._loadTaskSummary();
+    this._loadDashboard();
   }
 
   _loadTaskSummary = async () => {
     const s = await fetchTaskSummary();
     this.setState({ taskSummary: s });
+  };
+
+  // Charge les vraies données de bord (santé, entraînement, météo, veille) et en dérive
+  // l'indice de forme du jour, pour remplacer les valeurs factices du HUD.
+  _loadDashboard = async () => {
+    const [health, logs, weather, veille] = await Promise.all([
+      fetchHealth(),
+      fetchWorkoutLogs(),
+      fetchWeather(),
+      fetchWorldWatchSummary(),
+    ]);
+    const training = trainingSummary(logs);
+    const readiness = computeReadiness(health.latest, { daysSinceTraining: training.daysSince });
+    this.setState({ health: health.latest, weather, training, readiness, veille });
   };
 
   componentWillUnmount() {
@@ -777,29 +906,53 @@ class HomeCanvas extends Component {
     this.setState({ asking: false, askQuestion: '', answer: null, askError: null });
   }
 
+  // Lignes de statut du boot, construites à partir des vraies données de bord (elles se
+  // remplissent au fur et à mesure des chargements ; repli lisible si pas encore prêt).
+  _statusLines() {
+    const { readiness, health, weather, training, taskSummary } = this.state;
+    const sante = readiness
+      ? `SANTÉ — forme ${readiness.level.toLowerCase()} ${readiness.score}/100, sommeil ${fmtSleepH(health.sleep_hours)}.`
+      : (health ? `SANTÉ — sommeil ${fmtSleepH(health.sleep_hours)}, constantes stables.` : 'SANTÉ — en attente de synchronisation Apple Watch.');
+    const meteo = weather ? `MÉTÉO — ${weather.temp}°, ${weather.label.toLowerCase()} (ressenti ${weather.feels}°).` : 'MÉTÉO — acquisition de la position…';
+    const entr = training.nextLabel
+      ? `ENTRAÎNEMENT — ${training.nextLabel} conseillée · ${training.weekCount}/${training.weekTarget} cette semaine.`
+      : 'ENTRAÎNEMENT — aucune séance enregistrée.';
+    const taches = `TÂCHES — ${taskSummary.count} active${taskSummary.count > 1 ? 's' : ''}${taskSummary.top ? `, priorité : ${taskSummary.top}` : ', RAS'}.`;
+    return [sante, meteo, entr, taches];
+  }
+
   render() {
     const d = new Date();
     const h = d.getHours();
     const word = (h < 5 || h >= 22) ? 'Bonne nuit' : (h < 18 ? 'Bonjour' : 'Bonsoir');
-    const bootLines = this.state.booting ? STATUS_LINES.slice(0, this.state.bootStep) : [];
+    const bootLines = this.state.booting ? this._statusLines().slice(0, this.state.bootStep) : [];
+    const { readiness } = this.state;
 
     let subLine, statusWord = 'EN LIGNE';
     if (this.state.listening) { subLine = 'À l’écoute…'; statusWord = 'ÉCOUTE'; }
     else if (this.state.phase === 'thinking') { subLine = '▸ analyse…'; statusWord = 'CALCUL'; }
     else if (this.state.phase === 'responding') subLine = this.state.response;
     else if (this.state.booting && this.state.bootStep < 4) { subLine = 'Initialisation des systèmes…'; statusWord = 'DÉMARRAGE'; }
+    else if (readiness) subLine = `Forme ${readiness.level.toLowerCase()} · ${readiness.score}/100. ${readiness.verdict} En attente d’instructions.`;
     else subLine = 'Tous les systèmes sont opérationnels. En attente d’instructions.';
 
     if (this.state.asking === 'answered') statusWord = 'RÉPONSE';
     if (this.state.opening) { subLine = `Ouverture du fichier — ${this.state.opening.label}…`; statusWord = 'ACCÈS'; }
 
-    const { taskSummary, nextSession } = this.state;
+    const { taskSummary, health, training, veille } = this.state;
+    const santeVal = readiness ? `Forme ${readiness.level.toLowerCase()}` : (health ? 'Constantes OK' : 'Aucune donnée');
+    const santeSub = health
+      ? `sommeil ${fmtSleepH(health.sleep_hours)}${health.hrv != null ? ` · VFC ${Math.round(health.hrv)}` : ''}`
+      : 'connecte l’Apple Watch';
+    const entrVal = training.nextLabel ? `${training.nextLabel} conseillée` : 'Aucune séance';
+    const entrSub = training.nextLabel ? `${training.weekCount} / ${training.weekTarget} cette semaine` : 'commence une séance';
+    const veilleVal = veille.crit > 0 ? `${veille.crit} critique${veille.crit > 1 ? 's' : ''} · 48 h` : 'Signaux en direct';
     const modules = [
-      { label: 'SANTÉ', num: '01', value: 'Énergie 82 %', sub: 'sommeil 7 h 20', ref: this.santeRef, tap: () => this.openModule(this.santeRef, 'SANTÉ', '/sante') },
-      { label: 'ENTRAÎNEMENT', num: '02', value: `${nextSession.groupe} · ${nextSession.jour}`, sub: '3 / 4 cette semaine', ref: this.trainRef, tap: () => this.openModule(this.trainRef, 'ENTRAÎNEMENT', '/entrainement') },
+      { label: 'SANTÉ', num: '01', value: santeVal, sub: santeSub, ref: this.santeRef, tap: () => this.openModule(this.santeRef, 'SANTÉ', '/sante') },
+      { label: 'ENTRAÎNEMENT', num: '02', value: entrVal, sub: entrSub, ref: this.trainRef, tap: () => this.openModule(this.trainRef, 'ENTRAÎNEMENT', '/entrainement') },
       { label: 'TÂCHES', num: '03', value: `${taskSummary.count} en cours`, sub: taskSummary.top || 'aucune tâche', ref: this.tachesRef, tap: () => this.openModule(this.tachesRef, 'TÂCHES', '/taches') },
       { label: 'AGENDA', num: '04', value: 'Calendrier séances', sub: 'historique & suivi', ref: this.agendaRef, tap: () => this.openModule(this.agendaRef, 'AGENDA', '/entrainement', { initialScreen: 'calendar' }) },
-      { label: 'VEILLE MONDIALE', num: '05', value: 'Signaux en direct', sub: 'flux RSS + IA', ref: this.veilleRef, tap: () => this.openModule(this.veilleRef, 'VEILLE MONDIALE', '/veille') },
+      { label: 'VEILLE MONDIALE', num: '05', value: veilleVal, sub: 'flux RSS + IA', ref: this.veilleRef, tap: () => this.openModule(this.veilleRef, 'VEILLE MONDIALE', '/veille') },
     ];
     const value = this.state.value;
     const onInput = (e) => this.setState({ value: e.target.value });
@@ -826,6 +979,7 @@ class HomeCanvas extends Component {
             </div>
             <div className="home-status">
               <span><span className="home-dot" />{statusWord}</span>
+              {this.state.weather && <span className="home-hide-mobile" title={`${this.state.weather.label} · ressenti ${this.state.weather.feels}°`}>{this.state.weather.icon} {this.state.weather.temp}°</span>}
               <span className="home-hide-mobile">{dateStr}</span>
               <span ref={this.clockRef} style={{ color: '#eaf5ff', fontWeight: 500 }}>{d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
             </div>

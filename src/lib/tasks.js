@@ -9,6 +9,19 @@ export async function fetchTasks() {
   return data;
 }
 
+// Tâches actives (non closes), triées par priorité puis échéance — pour le tool
+// vocal gerer_taches (lister / clore).
+export async function fetchActiveTasks() {
+  if (!supabaseReady) return [];
+  const { data, error } = await supabase.from('tasks').select('*').neq('status', 'clos');
+  if (error || !data) return [];
+  return [...data].sort((a, b) => {
+    const p = PRI_ORDER[a.priority] - PRI_ORDER[b.priority];
+    if (p) return p;
+    return new Date(a.due_at || 8.64e15) - new Date(b.due_at || 8.64e15);
+  });
+}
+
 export async function fetchTaskSummary() {
   if (!supabaseReady) return { count: 0, top: null };
   const { data, error } = await supabase.from('tasks').select('title, priority').neq('status', 'clos');

@@ -89,7 +89,15 @@
       "Bash(curl -s \"https://wger.de/api/v2/exerciseinfo/?category=9&limit=100&format=json\")",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(d.get\\('count'\\)\\); [print\\(t.get\\('name'\\)\\) for r in d['results'] for t in r.get\\('translations',[]\\) if t.get\\('language'\\)==2]\")",
       "Bash(xargs ls -la)",
-      "Bash(npx vite *)"
+      "Bash(npx vite *)",
+      "Bash(curl -s \"https://api.open-meteo.com/v1/forecast?latitude=48.8566&longitude=2.3522&current=temperature_2m,apparent_temperature,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1\")",
+      "Bash(timeout 8 npm run dev)",
+      "Read(//tmp/**)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5173/)",
+      "Bash(curl -s 'https://vevxbnuyxzqkkicepjgv.supabase.co/rest/v1/world_watch_articles?select=count' -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZldnhibnV5eHpxa2tpY2Vwamd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MzAxMDQsImV4cCI6MjA5OTEwNjEwNH0.0_kbcdADvfhfEyMe14A8CqrZoCLujXn7yuyZfRzgzq8' -H 'Prefer: count=exact' -o /dev/null -w '%{http_code}\\\\n')",
+      "Bash(time curl -s -X POST https://vevxbnuyxzqkkicepjgv.supabase.co/functions/v1/world-watch-refresh -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZldnhibnV5eHpxa2tpY2Vwamd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MzAxMDQsImV4cCI6MjA5OTEwNjEwNH0.0_kbcdADvfhfEyMe14A8CqrZoCLujXn7yuyZfRzgzq8' -H 'Content-Type: application/json' --max-time 150)",
+      "Bash(curl -s -X POST https://vevxbnuyxzqkkicepjgv.supabase.co/functions/v1/world-watch-refresh -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZldnhibnV5eHpxa2tpY2Vwamd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MzAxMDQsImV4cCI6MjA5OTEwNjEwNH0.0_kbcdADvfhfEyMe14A8CqrZoCLujXn7yuyZfRzgzq8' -H 'Content-Type: application/json' --max-time 150)",
+      "Bash(curl -s 'https://vevxbnuyxzqkkicepjgv.supabase.co/rest/v1/world_watch_articles?select=count' -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZldnhibnV5eHpxa2tpY2Vwamd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MzAxMDQsImV4cCI6MjA5OTEwNjEwNH0.0_kbcdADvfhfEyMe14A8CqrZoCLujXn7yuyZfRzgzq8' -H 'Prefer: count=exact' -I)"
     ],
     "additionalDirectories": [
       "/Users/dylan/Oracle/supabase/functions",
