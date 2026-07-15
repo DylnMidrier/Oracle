@@ -99,7 +99,9 @@
       "Bash(curl -s -X POST https://vevxbnuyxzqkkicepjgv.supabase.co/functions/v1/world-watch-refresh -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZldnhibnV5eHpxa2tpY2Vwamd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MzAxMDQsImV4cCI6MjA5OTEwNjEwNH0.0_kbcdADvfhfEyMe14A8CqrZoCLujXn7yuyZfRzgzq8' -H 'Content-Type: application/json' --max-time 150)",
       "Bash(curl -s 'https://vevxbnuyxzqkkicepjgv.supabase.co/rest/v1/world_watch_articles?select=count' -H 'apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZldnhibnV5eHpxa2tpY2Vwamd2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1MzAxMDQsImV4cCI6MjA5OTEwNjEwNH0.0_kbcdADvfhfEyMe14A8CqrZoCLujXn7yuyZfRzgzq8' -H 'Prefer: count=exact' -I)",
       "Skill(claude-api)",
-      "Skill(claude-api:*)"
+      "Skill(claude-api:*)",
+      "Bash(grep -iA3 \"health-ingest\\\\|verify_jwt\")",
+      "WebFetch(domain:autosleepapp.tantsissa.com)"
     ],
     "additionalDirectories": [
       "/Users/dylan/Oracle/supabase/functions",
