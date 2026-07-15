@@ -34,11 +34,15 @@ export function computeReadiness(health, { daysSinceTraining } = {}) {
     factors.push({ key: 'hrv', label: 'VFC', score: Math.round(s), detail: `${Math.round(health.hrv)} ms / base ${Math.round(health.hrv_baseline)}` });
   }
 
-  // Sommeil : 8 h = 100.
+  // Sommeil : durée (8 h = 100) croisée avec la qualité AutoSleep (score /5) quand
+  // elle est disponible — 60 % durée / 40 % qualité. Sinon, durée seule.
   if (health.sleep_hours != null) {
-    const s = clamp((health.sleep_hours / 8) * 100, 0, 100);
+    const dur = clamp((health.sleep_hours / 8) * 100, 0, 100);
+    const hasScore = health.sleep_score != null;
+    const s = hasScore ? dur * 0.6 + clamp((health.sleep_score / 5) * 100, 0, 100) * 0.4 : dur;
     acc += s * 0.35; weight += 0.35;
-    factors.push({ key: 'sleep', label: 'SOMMEIL', score: Math.round(s), detail: fmtSleep(health.sleep_hours) });
+    const detail = hasScore ? `${fmtSleep(health.sleep_hours)} · ${health.sleep_score.toFixed(1)}/5` : fmtSleep(health.sleep_hours);
+    factors.push({ key: 'sleep', label: 'SOMMEIL', score: Math.round(s), detail });
   }
 
   // Fraîcheur : ≥ 2 j de repos = frais, la veille = correct, séance le jour même = fatigue.

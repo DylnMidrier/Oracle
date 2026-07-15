@@ -230,7 +230,9 @@ class HomeCanvas extends Component {
         const { readiness, health, training, taskSummary, veille, weather } = this.state;
         return {
           forme: readiness ? `${readiness.level} · ${readiness.score}/100 — ${readiness.verdict}` : 'données santé indisponibles',
-          sommeil: health?.sleep_hours != null ? fmtSleepH(health.sleep_hours) : '—',
+          sommeil: health?.sleep_hours != null
+            ? `${fmtSleepH(health.sleep_hours)}${health.sleep_score != null ? ` · ${health.sleep_score}/5` : ''}${health.sleep_evaluation ? ` (${health.sleep_evaluation})` : ''}`
+            : '—',
           vfc_ms: health?.hrv != null ? Math.round(health.hrv) : null,
           fc_repos: health?.heart_rate_resting ?? null,
           prochaine_seance: training?.nextLabel ? `${training.nextLabel} conseillée` : 'aucune séance enregistrée',
@@ -259,13 +261,21 @@ class HomeCanvas extends Component {
           date: latest.date,
           sommeil_h: latest.sleep_hours ?? null,
           score_sommeil_sur5: latest.sleep_score ?? null,
+          evaluation_sommeil: latest.sleep_evaluation ?? null,
+          coucher: latest.sleep_start ?? null,
+          reveil: latest.sleep_end ?? null,
           vfc_ms: latest.hrv ?? null,
           vfc_base_ms: latest.hrv_baseline ?? null,
           fc_repos: latest.heart_rate_resting ?? null,
+          fc_jour: latest.heart_rate_day ?? null,
+          fc_min: latest.heart_rate_min ?? null,
           fc_max: latest.heart_rate_max ?? null,
+          spo2_pct: latest.spo2 ?? null,
+          frequence_resp_min: latest.respiratory_rate ?? null,
           pas: latest.steps ?? null,
           calories_actives: latest.active_calories ?? null,
           minutes_exercice: latest.exercise_minutes ?? null,
+          heures_debout: latest.stand_hours ?? null,
           forme: r ? { indice: r.score, niveau: r.level, conseil: r.verdict, facteurs: r.factors.map((f) => `${f.label} ${f.score}`) } : null,
           tendance_sommeil_7j: trend.map((x) => x.sleep_hours).filter((v) => v != null),
         };
